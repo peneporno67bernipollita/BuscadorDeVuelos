@@ -174,8 +174,9 @@ def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     url, clave = os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_SERVICE_KEY")
     if not url or not clave:
-        log.error("Faltan SUPABASE_URL y/o SUPABASE_SERVICE_KEY (secretos del repositorio en GitHub).")
-        return 1
+        # Sin configurar todavía: se avisa en el registro pero no se marca como fallo
+        log.warning("Faltan SUPABASE_URL y/o SUPABASE_SERVICE_KEY (secretos del repositorio en GitHub). Nada que hacer.")
+        return 0
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     url_web = os.environ.get("URL_WEB") or None
     forzar = os.environ.get("FORZAR", "").lower() in ("1", "true", "si", "sí")

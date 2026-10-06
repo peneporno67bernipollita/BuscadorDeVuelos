@@ -86,6 +86,9 @@ En la pestaña **Variables**, pulsa **New repository variable**:
 |---|---|
 | `URL_WEB` | La dirección de tu web, p. ej. `https://buscadordevuelos.pages.dev` |
 
+> Esta variable es el **interruptor** del robot: mientras no exista, el robot no se ejecuta
+> (así no gasta minutos ni te llegan correos de error antes de terminar la instalación).
+
 Primera ronda de prueba:
 
 1. Ve a **Actions**. Si te lo pide, pulsa **I understand… enable them**.

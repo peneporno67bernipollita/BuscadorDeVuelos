@@ -19,6 +19,9 @@ concurrency:
 
 jobs:
   ronda:
+    # No se ejecuta hasta que configures la variable URL_WEB (docs/INSTALACION.md, paso 6):
+    # así no gasta minutos ni manda correos de error mientras falta la configuración.
+    if: ${{ vars.URL_WEB != '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
