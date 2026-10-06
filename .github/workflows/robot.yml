@@ -1,0 +1,48 @@
+name: Robot de vuelos
+
+on:
+  schedule:
+    # Cada 3 horas, en el minuto 17 (las horas en punto van más saturadas en GitHub).
+    # Cada web tiene además su propio intervalo mínimo (+20 min de margen) en la base de datos.
+    - cron: "17 */3 * * *"
+  workflow_dispatch:
+    inputs:
+      forzar:
+        description: "Ignorar intervalos (solo para pruebas; los bloqueos se respetan siempre)"
+        type: boolean
+        default: false
+
+# Nunca dos rondas a la vez
+concurrency:
+  group: robot-vuelos
+  cancel-in-progress: false
+
+jobs:
+  ronda:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: worker/requirements.txt
+
+      - name: Instalar dependencias
+        run: pip install -r worker/requirements.txt
+
+      - name: Pruebas rápidas
+        working-directory: worker
+        run: python -m pytest -q tests
+
+      - name: Buscar vuelos
+        working-directory: worker
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          URL_WEB: ${{ vars.URL_WEB }}
+          FORZAR: ${{ inputs.forzar && '1' || '' }}
+        run: python -m buscador.run

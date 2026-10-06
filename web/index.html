@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Buscador de Vuelos</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✈️</text></svg>">
+  <link rel="stylesheet" href="css/estilos.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js" defer></script>
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <header class="cabecera" id="cabecera" hidden>
+    <a class="marca" href="#/">✈️ <span>Buscador de Vuelos</span></a>
+    <nav class="menu" id="menu">
+      <a href="#/" data-ruta="panel">Panel</a>
+      <a href="#/nueva" data-ruta="nueva">Nueva búsqueda</a>
+      <a href="#/aerolineas" data-ruta="aerolineas">Aerolíneas</a>
+      <a href="#/estado" data-ruta="estado">Robot</a>
+      <a href="#/perfil" data-ruta="perfil">Perfil</a>
+      <button class="enlace" id="salir" type="button">Salir</button>
+    </nav>
+  </header>
+  <div class="banda-demo" id="banda-demo" hidden></div>
+  <main id="app" class="contenido">
+    <p class="cargando">Cargando…</p>
+  </main>
+</body>
+</html>
