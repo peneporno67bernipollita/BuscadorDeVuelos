@@ -13,6 +13,7 @@ const ERRORES = [
   [/password should be at least/i, "La contraseña debe tener al menos 6 caracteres."],
   [/rate limit/i, "Demasiados intentos seguidos. Espera unos minutos."],
   [/violates check constraint/i, "Algún dato no es válido. Revisa el formulario."],
+  [/telegram_prueba/i, "Falta actualizar la base de datos: ejecuta de nuevo supabase/instalar.sql en Supabase."],
   [/failed to fetch|network/i, "No hay conexión con la base de datos. Revisa tu internet."],
 ];
 
@@ -27,11 +28,25 @@ function comprobar({ data, error }) {
   return data;
 }
 
+const haceDias = (dias) => new Date(Date.now() - dias * 86400000).toISOString();
+const MAX_FILAS = 1000; // Supabase devuelve como mucho 1000 filas por petición
+
 async function crearReal() {
   const { createClient } = await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm");
   const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
   const usuario = async () => (await sb.auth.getSession()).data.session?.user ?? null;
   const volverAqui = location.origin + location.pathname;
+
+  /** Lee todas las páginas de una consulta (de 1000 en 1000, como mucho `paginas`). */
+  async function todas(consulta, paginas = 6) {
+    const filas = [];
+    for (let i = 0; i < paginas; i++) {
+      const lote = comprobar(await consulta().range(i * MAX_FILAS, (i + 1) * MAX_FILAS - 1));
+      filas.push(...lote);
+      if (lote.length < MAX_FILAS) break;
+    }
+    return filas;
+  }
 
   return {
     usuario,
@@ -58,6 +73,9 @@ async function crearReal() {
       const u = await usuario();
       return comprobar(await sb.from("perfiles").update(campos).eq("id", u.id).select().single());
     },
+    pedirPruebaTelegram() {
+      return this.guardarPerfil({ telegram_prueba: true });
+    },
 
     busquedas: async () => comprobar(await sb.from("busquedas").select("*").order("creada", { ascending: false })),
     busqueda: async (id) => comprobar(await sb.from("busquedas").select("*").eq("id", id).single()),
@@ -66,15 +84,18 @@ async function crearReal() {
       comprobar(await sb.from("busquedas").update(campos).eq("id", id).select().single()),
     borrarBusqueda: async (id) => comprobar(await sb.from("busquedas").delete().eq("id", id)),
 
-    historial: async (id) =>
-      comprobar(
-        await sb.from("precios").select("revisado,precio_total,fuente").eq("busqueda", id).eq("es_mejor", true)
-          .order("revisado", { ascending: true }).limit(1000),
-      ),
-    historialTodas: async () =>
-      comprobar(
-        await sb.from("precios").select("busqueda,revisado,precio_total").eq("es_mejor", true)
-          .order("revisado", { ascending: true }).limit(3000),
+    /** Mejor precio de cada revisión (para la gráfica), del más antiguo al más reciente. */
+    historial: (id, desde = null) =>
+      todas(() => {
+        let q = sb.from("precios").select("revisado,precio_total,fuente").eq("busqueda", id).eq("es_mejor", true);
+        if (desde) q = q.gte("revisado", desde);
+        return q.order("revisado", { ascending: true });
+      }),
+    /** Últimos 3 días de todas las búsquedas (minigráficas del panel). */
+    historialTodas: () =>
+      todas(() =>
+        sb.from("precios").select("busqueda,revisado,precio_total").eq("es_mejor", true).gte("revisado", haceDias(3))
+          .order("revisado", { ascending: true }),
       ),
     async ultimasOpciones(id) {
       const ultima = comprobar(
@@ -89,7 +110,7 @@ async function crearReal() {
     avisos: async (id) =>
       comprobar(await sb.from("avisos").select("*").eq("busqueda", id).order("enviado", { ascending: false }).limit(50)),
     avisosRecientes: async () =>
-      comprobar(await sb.from("avisos").select("*").order("enviado", { ascending: false }).limit(10)),
+      comprobar(await sb.from("avisos").select("*").order("enviado", { ascending: false }).limit(12)),
 
     aerolineas: async () => comprobar(await sb.from("aerolineas").select("*").order("nombre")),
     guardarAerolinea: async (a) => comprobar(await sb.from("aerolineas").upsert(a).select().single()),
@@ -98,15 +119,28 @@ async function crearReal() {
     fuentes: async () => comprobar(await sb.from("estado_fuentes").select("*").order("intervalo_min")),
     actualizarFuente: async (fuente, campos) =>
       comprobar(await sb.from("estado_fuentes").update(campos).eq("fuente", fuente).select().single()),
-    ejecuciones: async (limite = 30) =>
+    ejecuciones: async (limite = 40) =>
       comprobar(await sb.from("ejecuciones").select("*").order("inicio", { ascending: false }).limit(limite)),
-    async ejecucionesDelMes() {
-      const inicio = new Date();
-      inicio.setDate(1);
-      inicio.setHours(0, 0, 0, 0);
-      return comprobar(
-        await sb.from("ejecuciones").select("duracion_s").gte("inicio", inicio.toISOString()).limit(1000),
-      );
+    ejecucionesDesde: (dias) =>
+      todas(() => sb.from("ejecuciones").select("inicio,duracion_s,resumen").gte("inicio", haceDias(dias))),
+
+    /** Señal de vida del robot (null si no hay o si falta actualizar la base de datos). */
+    async latido() {
+      const { data, error } = await sb.from("ajustes").select("valor").eq("clave", "latido").maybeSingle();
+      return error ? null : data?.valor ?? null;
+    },
+
+    /**
+     * Tiempo real: avisa al instante de inserciones/cambios en una tabla.
+     * Devuelve la función para dejar de escuchar.
+     */
+    suscribir(tabla, alCambiar, filtro = undefined) {
+      const canal = sb
+        .channel(`rt-${tabla}-${filtro || "todo"}-${Math.random().toString(36).slice(2, 8)}`)
+        .on("postgres_changes", { event: "*", schema: "public", table: tabla, ...(filtro ? { filter: filtro } : {}) },
+          (cambio) => alCambiar(cambio))
+        .subscribe();
+      return () => sb.removeChannel(canal);
     },
   };
 }

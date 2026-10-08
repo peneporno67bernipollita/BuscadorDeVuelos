@@ -1,127 +1,179 @@
 import { api } from "../api.js";
+import { miniGrafica } from "../graficas.js";
+import { icono } from "../iconos.js";
 import {
-  aeropuertos, aviso, esc, eur, fechaHora, fechasTexto, hace, maletasTexto, nombreAeropuerto, pasajerosTexto,
+  $, aeropuertos, aviso, cadaSegundos, alSalir, contarHasta, cuentaAtras, deltaHtml, destello, esc, eur, fechaHora,
+  fechasTexto, hace, limpiarPantalla, pasajerosTexto,
 } from "../util.js";
 
-export const LIMITE_MINUTOS = 2000;
-// GitHub cobra por minuto empezado e incluye ~1 min de preparación por ronda
-export const minutosEstimados = (ejecuciones) =>
-  ejecuciones.reduce((s, e) => s + Math.ceil(((e.duracion_s || 0) + 60) / 60), 0);
+const TIPO_AVISO = {
+  presupuesto: "Dentro de presupuesto", buen_momento: "Buen momento", proximo: "Viaje próximo", final: "Último aviso",
+  bajada: "Ha bajado más", chollo: "Chollo", sin_presupuesto: "Nada dentro de presupuesto",
+};
 
-function miniGrafica(canvas, puntos, presupuesto) {
-  if (!window.Chart || puntos.length < 2) return;
-  const estilo = getComputedStyle(document.documentElement);
-  new Chart(canvas, {
-    type: "line",
-    data: {
-      labels: puntos.map((p) => p.revisado),
-      datasets: [
-        { data: puntos.map((p) => Number(p.precio_total)), borderColor: estilo.getPropertyValue("--acento").trim(), borderWidth: 2, pointRadius: 0, tension: 0.3 },
-        ...(presupuesto ? [{ data: puntos.map(() => Number(presupuesto)), borderColor: estilo.getPropertyValue("--ok").trim(), borderWidth: 1, borderDash: [4, 4], pointRadius: 0 }] : []),
-      ],
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false, animation: false,
-      plugins: { legend: { display: false }, tooltip: { enabled: false } },
-      scales: { x: { display: false }, y: { display: false } },
-    },
-  });
+function rutaHtml(datos, origen, destino, idaVuelta) {
+  const a = (c) => datos.mapa.get(c);
+  const ciudad = (c) => esc(a(c)?.es || a(c)?.m || c);
+  return `
+    <div class="ruta" title="${idaVuelta ? "Ida y vuelta" : "Solo ida"}">
+      <div class="aeropuerto"><div class="codigo">${esc(origen)}</div><div class="ciudad">${ciudad(origen)}</div></div>
+      <div class="trazo">${icono("avion")}</div>
+      <div class="aeropuerto fin"><div class="codigo">${esc(destino)}</div><div class="ciudad">${ciudad(destino)}</div></div>
+    </div>`;
 }
 
 function tarjetaBusqueda(b, datos) {
-  const ruta = `${nombreAeropuerto(datos, b.origen)} ${b.ida_vuelta ? "⇄" : "→"} ${nombreAeropuerto(datos, b.destino)}`;
-  const precio = b.precio_actual != null ? eur(b.precio_actual) : "—";
-  const modoPrecio = b.modo_precio === "presupuesto"
-    ? `<span class="insignia acento">Máx. ${eur(b.presupuesto)}</span>`
-    : '<span class="insignia acento">Lo más barato</span>';
-  const tipo = b.modo === "chollo" ? '<span class="insignia alerta">Chollo · cualquier fecha</span>' : '<span class="insignia">Fechas concretas</span>';
-  const estado = b.activa ? "" : '<span class="insignia mal">Pausada</span>';
-  const ultimoAviso = b.ultimo_aviso_precio != null
-    ? `<div class="pequeno">🔔 Último aviso: <b>${eur(b.ultimo_aviso_precio)}</b> ${hace(b.ultimo_aviso_en)}</div>` : "";
+  const variacion = b.info?.variacion;
+  const presupuesto = b.modo_precio === "presupuesto"
+    ? `<span class="chip ${b.precio_actual != null && Number(b.precio_actual) <= Number(b.presupuesto) ? "ok" : ""}">${icono("euro")}Máx. ${eur(b.presupuesto, true)}</span>`
+    : `<span class="chip primario">${icono("baja")}Lo más barato</span>`;
+  const tipo = b.modo === "chollo" ? `<span class="chip alerta">${icono("llama")}Chollo</span>` : "";
   return `
-    <article class="tarjeta busqueda ${b.activa ? "" : "pausada"}">
-      <div class="fila entre"><a href="#/busqueda/${b.id}" class="ruta" style="text-decoration:none;color:inherit">${esc(b.nombre)}</a>${estado}</div>
-      <div class="suave">${esc(ruta)}</div>
-      <div class="fila">${tipo}${modoPrecio}</div>
-      <div class="pequeno">${esc(fechasTexto(b))}</div>
-      <div class="pequeno suave">${esc(pasajerosTexto(b))} · ${esc(maletasTexto(b))}</div>
-      <div class="fila entre">
-        <div><div class="precio">${precio}</div><div class="pequeno suave">precio total actual${b.mejor_precio != null ? ` · mínimo visto ${eur(b.mejor_precio)}` : ""}</div></div>
+    <article class="tarjeta interactiva busqueda ${b.activa ? "" : "pausada"} ${b.ultimo_aviso_precio != null ? "resaltada" : ""}" data-id="${b.id}">
+      <div class="busqueda-cabecera">
+        <div>
+          <a href="#/busqueda/${b.id}" class="busqueda-nombre">${esc(b.nombre)}</a>
+          <div class="fila" style="gap:.35rem;margin-top:.4rem">${tipo}${presupuesto}${b.activa ? "" : `<span class="chip mal">${icono("pausa")}En pausa</span>`}</div>
+        </div>
+        <button class="icono pequeno fantasma" data-pausar="${b.id}" title="${b.activa ? "Pausar" : "Reanudar"}">${icono(b.activa ? "pausa" : "play")}</button>
       </div>
-      <div class="mini-grafica"><canvas data-grafica="${b.id}"></canvas></div>
-      ${ultimoAviso}
-      <div class="pequeno suave">${esc(b.estado || "Pendiente de la primera revisión")}</div>
-      <div class="pequeno suave">Revisado ${hace(b.ultima_revision)} · próxima revisión ${b.activa ? hace(b.proxima_revision) : "en pausa"}</div>
+      ${rutaHtml(datos, b.origen, b.destino, b.ida_vuelta)}
+      <div class="fila pequeno suave" style="gap:.9rem">
+        <span class="fila" style="gap:.3rem">${icono("calendario")}${esc(fechasTexto(b))}</span>
+        <span class="fila" style="gap:.3rem">${icono("personas")}${esc(pasajerosTexto(b))}</span>
+      </div>
+      <div class="precio-bloque">
+        <div>
+          <div class="precio-grande" data-precio>${b.precio_actual != null ? eur(b.precio_actual) : "—"}</div>
+          <div class="precio-etiqueta">${b.mejor_precio != null ? `mínimo visto ${eur(b.mejor_precio)}` : "precio total para todos"}</div>
+        </div>
+        <div data-delta>${variacion != null ? deltaHtml(variacion) : ""}</div>
+      </div>
+      <div class="mini-grafica"><canvas data-grafica="${b.id}" aria-label="Evolución del precio"></canvas></div>
+      <div class="busqueda-pie">
+        <span class="pequeno suave" data-estado>${esc(b.estado || "Pendiente de la primera revisión")}</span>
+        <span class="pequeno tenue" data-revisado>${b.activa ? `próxima ${hace(b.proxima_revision)}` : "en pausa"}</span>
+      </div>
       <div class="acciones">
-        <a class="boton pequeno primario" href="#/busqueda/${b.id}">Ver detalle</a>
-        <a class="boton pequeno" href="#/editar/${b.id}">Editar</a>
-        <button class="pequeno" data-pausar="${b.id}">${b.activa ? "Pausar" : "Reanudar"}</button>
-        <a class="boton pequeno" href="#/duplicar/${b.id}">Duplicar</a>
+        <a class="boton pequeno primario" href="#/busqueda/${b.id}">${icono("grafica")}En directo</a>
+        <a class="boton pequeno" href="#/editar/${b.id}">${icono("editar")}Editar</a>
+        <a class="boton pequeno fantasma" href="#/duplicar/${b.id}">${icono("duplicar")}Duplicar</a>
       </div>
     </article>`;
 }
 
 export async function vistaPanel(app) {
-  const [busquedas, historial, avisos, fuentes, ejecucionesMes, datos] = await Promise.all([
-    api.busquedas(), api.historialTodas(), api.avisosRecientes(), api.fuentes(), api.ejecucionesDelMes(), aeropuertos(),
+  const recargar = () => {
+    limpiarPantalla();
+    return vistaPanel(app);
+  };
+  let tiempoRealActivo = false;
+  const [busquedas, historial, avisos, perfil, datos] = await Promise.all([
+    api.busquedas(), api.historialTodas(), api.avisosRecientes(), api.perfil(), aeropuertos(),
   ]);
   const activas = busquedas.filter((b) => b.activa);
+  const conPrecio = activas.filter((b) => b.precio_actual != null);
+  const mejor = conPrecio.sort((x, y) => x.precio_actual - y.precio_actual)[0];
   const semana = Date.now() - 7 * 86400000;
   const avisosSemana = avisos.filter((a) => new Date(a.enviado) > semana).length;
-  const minutos = minutosEstimados(ejecucionesMes);
-  const fuentesTexto = fuentes
-    .map((f) => {
-      const bloqueada = f.bloqueada_hasta && new Date(f.bloqueada_hasta) > new Date();
-      const clase = !f.activa ? "" : bloqueada ? "mal" : "ok";
-      const texto = !f.activa ? "desactivada" : bloqueada ? "bloqueada" : "ok";
-      return `<span class="insignia ${clase}">${esc(f.nombre)}: ${texto}</span>`;
-    })
-    .join(" ");
+  const proxima = activas.map((b) => b.proxima_revision).filter(Boolean).sort()[0];
+  const horaDia = new Date().getHours();
+  const saludo = horaDia < 13 ? "Buenos días" : horaDia < 21 ? "Buenas tardes" : "Buenas noches";
 
   app.innerHTML = `
-    <div class="titulo-pagina">
-      <h1>Tus búsquedas</h1>
-      <a class="boton primario" href="#/nueva">＋ Nueva búsqueda</a>
-    </div>
-    <div class="cifras">
-      <div class="cifra"><div class="valor">${activas.length}</div><div class="etiqueta">búsquedas activas</div></div>
-      <div class="cifra"><div class="valor">${avisosSemana}</div><div class="etiqueta">avisos en 7 días</div></div>
-      <div class="cifra"><div class="valor">${minutos}<span class="suave pequeno"> / ${LIMITE_MINUTOS}</span></div><div class="etiqueta">minutos de GitHub este mes (aprox.; sin límite si el repositorio es público)</div></div>
-    </div>
-    <p class="fila pequeno">${fuentesTexto} <a href="#/estado">Ver robot</a></p>
-    ${busquedas.length
-      ? `<div class="rejilla">${busquedas.map((b) => tarjetaBusqueda(b, datos)).join("")}</div>`
-      : `<div class="tarjeta"><h2>Aún no vigilas ningún vuelo</h2>
-           <p>Crea una búsqueda con tus aeropuertos exactos, fechas, horarios, pasajeros y maletas.
-           El robot la revisará cada pocas horas y te avisará por Telegram cuando sea buen momento para comprar.</p>
-           <a class="boton primario" href="#/nueva">Crear mi primera búsqueda</a></div>`}
-    ${avisos.length ? `
-      <section class="tarjeta">
-        <h2>🔔 Últimos avisos</h2>
-        <div class="tabla-envoltura"><table>
-          <thead><tr><th>Cuándo</th><th>Búsqueda</th><th>Motivo</th><th>Total</th><th>Telegram</th></tr></thead>
-          <tbody>${avisos.map((a) => {
-            const b = busquedas.find((x) => x.id === a.busqueda);
-            return `<tr><td>${fechaHora(a.enviado)}</td><td>${b ? `<a href="#/busqueda/${b.id}">${esc(b.nombre)}</a>` : "—"}</td>
-              <td>${esc(a.motivo)}</td><td class="num"><b>${eur(a.precio_total)}</b></td>
-              <td>${a.entregado ? '<span class="insignia ok">enviado</span>' : '<span class="insignia alerta">sin enviar</span>'}</td></tr>`;
-          }).join("")}</tbody>
-        </table></div>
-      </section>` : ""}`;
+    <div>
+      <div class="cabecera-pagina">
+        <div>
+          <span class="etiqueta-superior">${icono("panel")} Panel</span>
+          <h1>${saludo}${perfil.nombre ? `, ${esc(perfil.nombre)}` : ""} ✈️</h1>
+          <p class="subtitulo">${activas.length ? `Vigilando ${activas.length} búsqueda${activas.length > 1 ? "s" : ""} sin parar.` : "Crea tu primera búsqueda y el robot se pondrá a vigilarla."}</p>
+        </div>
+        <a class="boton primario grande" href="#/nueva">${icono("mas")}Nueva búsqueda</a>
+      </div>
 
+      <div class="kpis escalonado">
+        <div class="tarjeta kpi"><div class="kpi-icono ok">${icono("etiqueta")}</div>
+          <div><div class="valor" id="kpi-mejor">—</div><div class="etiqueta">${mejor ? `mejor precio · ${esc(mejor.nombre)}` : "mejor precio actual"}</div></div></div>
+        <div class="tarjeta kpi"><div class="kpi-icono">${icono("lupa")}</div>
+          <div><div class="valor" id="kpi-activas">0</div><div class="etiqueta">búsquedas activas</div></div></div>
+        <div class="tarjeta kpi"><div class="kpi-icono alerta">${icono("campana")}</div>
+          <div><div class="valor" id="kpi-avisos">0</div><div class="etiqueta">avisos en 7 días</div></div></div>
+        <div class="tarjeta kpi"><div class="kpi-icono">${icono("reloj")}</div>
+          <div><div class="valor cuenta-atras" id="kpi-proxima">${proxima ? cuentaAtras(proxima) : "—"}</div><div class="etiqueta">para la próxima revisión</div></div></div>
+      </div>
+
+      ${busquedas.length
+        ? `<div class="rejilla escalonado" style="margin-top:1.3rem" id="rejilla">${busquedas.map((b) => tarjetaBusqueda(b, datos)).join("")}</div>`
+        : `<div class="tarjeta vacio" style="margin-top:1.3rem">
+             <div class="ilustracion">${icono("avion")}</div>
+             <h2>Aún no vigilas ningún vuelo</h2>
+             <p>Elige aeropuertos, fechas, horarios, pasajeros y maletas. El robot revisará los precios sin parar
+               y te avisará por Telegram en el mejor momento.</p>
+             <a class="boton primario grande" href="#/nueva">${icono("mas")}Crear mi primera búsqueda</a>
+           </div>`}
+
+      ${avisos.length ? `
+        <section class="tarjeta" style="margin-top:1.3rem">
+          <div class="tarjeta-titulo"><h2>${icono("campana")}Últimos avisos</h2><span class="chip">${avisos.length}</span></div>
+          <ul class="linea-tiempo">${avisos.map((a) => {
+            const b = busquedas.find((x) => x.id === a.busqueda);
+            return `<li class="${a.entregado ? "ok" : ""}">
+              <div class="fila entre"><b>${esc(TIPO_AVISO[a.tipo] || a.tipo)} · ${eur(a.precio_total)}</b>
+                <span class="cuando">${fechaHora(a.enviado)}</span></div>
+              <div class="pequeno suave">${b ? `<a href="#/busqueda/${b.id}">${esc(b.nombre)}</a> · ` : ""}${esc(a.motivo)}</div>
+              <div class="pequeno ${a.entregado ? "" : "tenue"}">${a.entregado ? "✓ Enviado a Telegram" : "No enviado: vincula Telegram en tu perfil"}</div>
+            </li>`;
+          }).join("")}</ul>
+        </section>` : ""}
+    </div>`;
+
+  contarHasta($("#kpi-mejor"), mejor ? Number(mejor.precio_actual) : null);
+  contarHasta($("#kpi-activas"), activas.length, { formato: (n) => String(Math.round(n)), duracion: 600 });
+  contarHasta($("#kpi-avisos"), avisosSemana, { formato: (n) => String(Math.round(n)), duracion: 600 });
+  if (proxima) cadaSegundos(1, () => { $("#kpi-proxima").textContent = cuentaAtras(proxima); });
+
+  // Precios y minigráficas
+  const graficas = new Map();
   for (const b of busquedas) {
-    const canvas = app.querySelector(`[data-grafica="${b.id}"]`);
-    // Tras editar el viaje solo cuenta el historial nuevo
+    const tarjeta = app.querySelector(`[data-id="${b.id}"]`);
+    contarHasta(tarjeta.querySelector("[data-precio]"), b.precio_actual != null ? Number(b.precio_actual) : null);
     const puntos = historial.filter((h) => h.busqueda === b.id && (!b.historial_desde || h.revisado >= b.historial_desde));
-    miniGrafica(canvas, puntos, b.modo_precio === "presupuesto" ? b.presupuesto : null);
+    graficas.set(b.id, miniGrafica(tarjeta.querySelector("canvas"), puntos, {
+      presupuesto: b.modo_precio === "presupuesto" ? b.presupuesto : null,
+    }));
   }
+  alSalir(() => graficas.forEach((g) => g?.destruir()));
+
+  // Tiempo real: cada búsqueda revisada actualiza su tarjeta al momento
+  alSalir(api.suscribir("busquedas", ({ new: b }) => {
+    tiempoRealActivo = true;
+    const tarjeta = b && app.querySelector(`[data-id="${b.id}"]`);
+    if (!tarjeta) return;
+    const precioEl = tarjeta.querySelector("[data-precio]");
+    const antes = Number(String(precioEl.dataset.valor ?? "")) || null;
+    const ahora = b.precio_actual != null ? Number(b.precio_actual) : null;
+    contarHasta(precioEl, ahora, { desde: antes ?? ahora ?? 0 });
+    precioEl.dataset.valor = ahora ?? "";
+    if (antes != null && ahora != null && antes !== ahora) destello(tarjeta, ahora - antes);
+    tarjeta.querySelector("[data-delta]").innerHTML = b.info?.variacion != null ? deltaHtml(b.info.variacion) : "";
+    tarjeta.querySelector("[data-estado]").textContent = b.estado || "";
+    tarjeta.querySelector("[data-revisado]").textContent = b.activa ? `próxima ${hace(b.proxima_revision)}` : "en pausa";
+  }));
+  alSalir(api.suscribir("precios", ({ new: p }) => {
+    tiempoRealActivo = true;
+    if (p?.es_mejor !== false && graficas.get(p?.busqueda)) graficas.get(p.busqueda).añadir(p);
+  }));
+  for (const b of busquedas) app.querySelector(`[data-id="${b.id}"] [data-precio]`).dataset.valor = b.precio_actual ?? "";
+  // Respaldo por si el tiempo real no está activado en Supabase: recargar cada 2 minutos
+  cadaSegundos(120, () => !tiempoRealActivo && recargar());
+
   app.querySelectorAll("[data-pausar]").forEach((boton) =>
     boton.addEventListener("click", async () => {
       const b = busquedas.find((x) => x.id === boton.dataset.pausar);
       try {
         await api.actualizarBusqueda(b.id, { activa: !b.activa });
-        aviso(b.activa ? "Búsqueda en pausa" : "Búsqueda reanudada: se revisará en la próxima ronda");
-        vistaPanel(app);
+        aviso(b.activa ? "Búsqueda en pausa" : "Búsqueda reanudada: el robot la revisa en un minuto");
+        recargar();
       } catch (e) {
         aviso(e.message, "error");
       }

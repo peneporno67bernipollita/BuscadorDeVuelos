@@ -1,4 +1,5 @@
-// Utilidades de la web: formato, escape de HTML, aeropuertos y avisos en pantalla.
+// Utilidades de la web: formato, escape de HTML, aeropuertos, avisos, modal y animaciones.
+import { icono } from "./iconos.js";
 
 export const $ = (selector, raiz = document) => raiz.querySelector(selector);
 export const $$ = (selector, raiz = document) => [...raiz.querySelectorAll(selector)];
@@ -7,7 +8,9 @@ export const esc = (valor) =>
   String(valor ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
 const fmtEur = new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR" });
-export const eur = (n) => (n === null || n === undefined || n === "" ? "—" : fmtEur.format(Number(n)));
+const fmtEurRedondo = new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
+export const eur = (n, redondo = false) =>
+  n === null || n === undefined || n === "" ? "—" : (redondo ? fmtEurRedondo : fmtEur).format(Number(n));
 
 const aFecha = (d) => new Date(String(d).length === 10 ? `${d}T12:00:00` : d);
 const fmtFecha = new Intl.DateTimeFormat("es-ES", { weekday: "short", day: "numeric", month: "short" });
@@ -18,21 +21,103 @@ const fmtHora = new Intl.DateTimeFormat("es-ES", { hour: "2-digit", minute: "2-d
 export const fecha = (d) => (d ? fmtFecha.format(aFecha(d)) : "");
 export const fechaAnyo = (d) => (d ? fmtFechaAnyo.format(aFecha(d)) : "");
 export const fechaHora = (iso) => (iso ? fmtFechaHora.format(new Date(iso)) : "—");
+export const hora = (iso) => (iso ? fmtHora.format(new Date(iso)) : "");
 // Las horas de los vuelos vienen en hora local del aeropuerto, sin zona: se muestran tal cual
 export const horaLocal = (iso) => (iso ? String(iso).slice(11, 16) : "");
-export const hora = (iso) => (iso ? fmtHora.format(new Date(iso)) : "");
 
 export function hace(iso) {
   if (!iso) return "nunca";
-  const min = Math.round((Date.now() - new Date(iso)) / 60000);
-  if (Math.abs(min) < 1) return "ahora mismo";
-  const futuro = min < 0;
-  const m = Math.abs(min);
+  const seg = Math.round((Date.now() - new Date(iso)) / 1000);
+  const futuro = seg < 0;
+  const s = Math.abs(seg);
+  if (s < 45) return futuro ? "en unos segundos" : "ahora mismo";
+  const m = Math.round(s / 60);
   const texto = m < 60 ? `${m} min` : m < 48 * 60 ? `${Math.round(m / 60)} h` : `${Math.round(m / 1440)} días`;
   return futuro ? `en ${texto}` : `hace ${texto}`;
 }
 
+/** "12:34" hasta una fecha (o "ahora" si ya pasó). */
+export function cuentaAtras(iso) {
+  if (!iso) return "—";
+  const s = Math.max(0, Math.round((new Date(iso) - Date.now()) / 1000));
+  if (s === 0) return "ahora";
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const seg = s % 60;
+  return h ? `${h}:${String(m).padStart(2, "0")}:${String(seg).padStart(2, "0")}` : `${String(m).padStart(2, "0")}:${String(seg).padStart(2, "0")}`;
+}
+
 export const diasHasta = (d) => Math.round((aFecha(d) - new Date()) / 86400000);
+
+/** Bandera emoji a partir del código de país (ES → 🇪🇸). */
+export const bandera = (pais) =>
+  pais && pais.length === 2 ? String.fromCodePoint(...[...pais.toUpperCase()].map((c) => 127397 + c.charCodeAt(0))) : "🌍";
+
+// ---------------------------------------------------------------------------
+// Limpieza al cambiar de pantalla (suscripciones en tiempo real, intervalos...)
+// ---------------------------------------------------------------------------
+let limpiezas = [];
+export const alSalir = (fn) => limpiezas.push(fn);
+export function limpiarPantalla() {
+  limpiezas.forEach((fn) => {
+    try { fn(); } catch (e) { console.warn(e); }
+  });
+  limpiezas = [];
+}
+export function cadaSegundos(segundos, fn) {
+  const id = setInterval(fn, segundos * 1000);
+  alSalir(() => clearInterval(id));
+  return id;
+}
+
+// ---------------------------------------------------------------------------
+// Animaciones
+// ---------------------------------------------------------------------------
+const sinMovimiento = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/** Anima un número de "desde" a "hasta" dentro de un elemento. */
+export function contarHasta(el, hasta, { desde = 0, formato = (n) => eur(n), duracion = 900 } = {}) {
+  if (!el) return;
+  if (hasta === null || hasta === undefined) {
+    el.textContent = "—";
+    return;
+  }
+  if (sinMovimiento() || desde === hasta) {
+    el.textContent = formato(hasta);
+    return;
+  }
+  const inicio = performance.now();
+  const paso = (t) => {
+    const p = Math.min(1, (t - inicio) / duracion);
+    const suave = 1 - Math.pow(1 - p, 4);
+    el.textContent = formato(desde + (hasta - desde) * suave);
+    if (p < 1) requestAnimationFrame(paso);
+  };
+  requestAnimationFrame(paso);
+}
+
+/** Destello verde (baja) o rojo (sube) al cambiar un precio en directo. */
+export function destello(el, sentido) {
+  if (!el) return;
+  el.classList.remove("destello-baja", "destello-sube");
+  void el.offsetWidth;
+  el.classList.add(sentido < 0 ? "destello-baja" : "destello-sube");
+}
+
+/** Efecto de onda al pulsar botones. */
+export function activarOndas() {
+  document.addEventListener("pointerdown", (ev) => {
+    const boton = ev.target.closest("button, .boton");
+    if (!boton || sinMovimiento()) return;
+    const r = boton.getBoundingClientRect();
+    const onda = document.createElement("span");
+    const lado = Math.max(r.width, r.height);
+    onda.className = "onda";
+    onda.style.cssText = `width:${lado}px;height:${lado}px;left:${ev.clientX - r.left - lado / 2}px;top:${ev.clientY - r.top - lado / 2}px`;
+    boton.append(onda);
+    setTimeout(() => onda.remove(), 650);
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Aeropuertos (datos públicos de OurAirports, ~4000 con vuelos regulares)
@@ -62,27 +147,71 @@ export function buscarAeropuertos(datos, texto, limite = 8) {
   const exacto = datos.mapa.get(texto.trim().toUpperCase());
   const palabras = q.split(/\s+/);
   const encontrados = datos.lista.filter((a) => palabras.every((p) => a._txt.includes(p)));
-  // Primero coincidencia exacta de código, luego los que tienen nombre en español (los más habituales)
+  // Primero los que tienen nombre en español (los más habituales) y los de España
   encontrados.sort((x, y) => (y.es ? 1 : 0) - (x.es ? 1 : 0) || (y.p === "ES") - (x.p === "ES"));
   const res = exacto ? [exacto, ...encontrados.filter((a) => a !== exacto)] : encontrados;
   return res.slice(0, limite);
 }
 
 // ---------------------------------------------------------------------------
-// Avisos en pantalla
+// Avisos en pantalla y confirmaciones
 // ---------------------------------------------------------------------------
 export function aviso(mensaje, tipo = "ok") {
+  const caja = $("#toasts");
   const el = document.createElement("div");
-  el.className = `toast toast-${tipo}`;
-  el.textContent = mensaje;
-  document.body.append(el);
-  requestAnimationFrame(() => el.classList.add("visible"));
+  el.className = `toast ${tipo === "error" ? "error" : ""}`;
+  el.innerHTML = `${icono(tipo === "error" ? "aviso" : "check")}<span>${esc(mensaje)}</span>`;
+  caja.append(el);
   setTimeout(() => {
-    el.classList.remove("visible");
-    setTimeout(() => el.remove(), 300);
-  }, tipo === "error" ? 6000 : 3000);
+    el.classList.add("saliendo");
+    setTimeout(() => el.remove(), 320);
+  }, tipo === "error" ? 6000 : 3200);
 }
 
+/** Ventana de confirmación bonita. Devuelve una promesa con true/false. */
+export function confirmar({ titulo, texto, aceptar = "Confirmar", peligro = true }) {
+  return new Promise((resolver) => {
+    const fondo = document.createElement("div");
+    fondo.className = "modal-fondo";
+    fondo.innerHTML = `
+      <div class="tarjeta modal" role="dialog" aria-modal="true" aria-labelledby="modal-titulo">
+        <h2 id="modal-titulo">${peligro ? icono("aviso") : ""}${esc(titulo)}</h2>
+        <p class="suave">${esc(texto)}</p>
+        <div class="fila">
+          <button type="button" data-no>Cancelar</button>
+          <button type="button" class="${peligro ? "peligro" : "primario"}" data-si>${esc(aceptar)}</button>
+        </div>
+      </div>`;
+    const cerrar = (valor) => {
+      fondo.remove();
+      document.removeEventListener("keydown", tecla);
+      resolver(valor);
+    };
+    const tecla = (ev) => ev.key === "Escape" && cerrar(false);
+    fondo.addEventListener("click", (ev) => ev.target === fondo && cerrar(false));
+    fondo.querySelector("[data-no]").addEventListener("click", () => cerrar(false));
+    fondo.querySelector("[data-si]").addEventListener("click", () => cerrar(true));
+    document.addEventListener("keydown", tecla);
+    document.body.append(fondo);
+    fondo.querySelector("[data-si]").focus();
+  });
+}
+
+/** Pone un botón en estado "cargando" mientras dura la promesa. */
+export async function conCarga(boton, promesa) {
+  boton?.classList.add("cargando");
+  if (boton) boton.disabled = true;
+  try {
+    return await promesa;
+  } finally {
+    boton?.classList.remove("cargando");
+    if (boton) boton.disabled = false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Textos de búsquedas
+// ---------------------------------------------------------------------------
 export function pasajerosTexto(b) {
   const p = [`${b.adultos} adulto${b.adultos !== 1 ? "s" : ""}`];
   if (b.ninos) p.push(`${b.ninos} niño${b.ninos !== 1 ? "s" : ""}`);
@@ -100,9 +229,9 @@ export function maletasTexto(b) {
 export function fechasTexto(b) {
   if (b.modo === "chollo") {
     const noches = b.ida_vuelta ? ` · ${b.noches_min}-${b.noches_max} noches` : "";
-    return `Cualquier fecha del ${fechaAnyo(b.chollo_desde)} al ${fechaAnyo(b.chollo_hasta)}${noches}`;
+    return `Del ${fecha(b.chollo_desde)} al ${fecha(b.chollo_hasta)}${noches}`;
   }
-  const flex = b.flex_dias ? ` (±${b.flex_dias} día${b.flex_dias > 1 ? "s" : ""})` : "";
+  const flex = b.flex_dias ? ` (±${b.flex_dias} d)` : "";
   return b.ida_vuelta ? `${fecha(b.fecha_ida)} → ${fecha(b.fecha_vuelta)}${flex}` : `${fecha(b.fecha_ida)}${flex} · solo ida`;
 }
 
@@ -110,4 +239,13 @@ export function generarCodigo() {
   const letras = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const bytes = crypto.getRandomValues(new Uint8Array(8));
   return [...bytes].map((x) => letras[x % letras.length]).join("");
+}
+
+/** Variación entre dos precios para mostrar ▼/▲. */
+export function deltaHtml(diferencia, { conIcono = true } = {}) {
+  if (diferencia === null || diferencia === undefined || Number.isNaN(diferencia)) return "";
+  const d = Math.round(diferencia * 100) / 100;
+  if (Math.abs(d) < 0.01) return `<span class="delta igual">${conIcono ? icono("igual") : ""}igual</span>`;
+  const baja = d < 0;
+  return `<span class="delta ${baja ? "baja" : "sube"}">${conIcono ? icono(baja ? "baja" : "sube") : ""}${baja ? "−" : "+"}${eur(Math.abs(d))}</span>`;
 }

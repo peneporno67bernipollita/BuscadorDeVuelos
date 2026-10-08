@@ -12,24 +12,26 @@ Tú compras en la web oficial de la aerolínea.
   [investigación](docs/INVESTIGACION.md)).
 - **Seguridad**: solo aerolíneas seguras (lista blanca estricta, editable) y solo enlaces a webs oficiales.
 - **Privacidad**: cada búsqueda en una sesión privada nueva, sin cookies.
+- **En directo**: el robot busca sin parar y la web muestra al momento cada cambio de precio, con gráfica y estadísticas.
 
 ## Cómo funciona
 
 ```
- Tú ──► Web (Cloudflare Pages) ──► Base de datos (Supabase) ◄── Robot (GitHub Actions, cada 3 h)
+ Tú ──► Web (Cloudflare Pages) ◄─tiempo real─► Base de datos (Supabase) ◄── Robot (GitHub Actions, sin parar)
                                                                      │
                                        Google Flights · Ryanair ◄────┤
                                                                      └──► Avisos por Telegram
 ```
 
 1. En la web creas una búsqueda: aeropuertos, fechas, horarios, pasajeros, maletas y presupuesto.
-2. Cada 3 horas GitHub ejecuta el robot. Cada búsqueda se revisa cada 3, 6 o 12 h, según lo cerca que esté el viaje.
-   Cada web consultada tiene su propio ritmo, con 20 min de margen sobre lo recomendado.
+2. El robot funciona sin parar en GitHub Actions (sesiones de casi 6 horas que se encadenan solas). Cada búsqueda
+   se revisa cada 20, 40 o 90 min, según lo cerca que esté el viaje, y cada web consultada tiene su propio ritmo.
 3. El robot hace lo siguiente:
    - Descarta lo que no cumple tus filtros.
    - Calcula el total real: billetes + maletas − descuentos.
-   - Guarda el historial y decide si avisar.
-4. Te llega un Telegram con el vuelo, el desglose del precio y el enlace a la web oficial para comprar.
+   - Guarda el historial (la web lo muestra al instante) y decide si avisar.
+4. Te llega un Telegram con el vuelo, el desglose del precio y el enlace a la web oficial para comprar:
+   al llegar a tu presupuesto, al tocar el mínimo en el mejor momento, en un chollo o si baja todavía más.
 
 ## Estructura
 
@@ -39,7 +41,7 @@ Tú compras en la web oficial de la aerolínea.
 | `worker/buscador/` | El robot en Python: fuentes (Google Flights, Ryanair, Skyscanner), filtros, precios, decisión y avisos. |
 | `worker/tests/` | Pruebas automáticas, que se ejecutan antes de cada ronda. |
 | `supabase/` | `instalar.sql`: tablas, seguridad y lista blanca de aerolíneas. |
-| `.github/workflows/robot.yml` | Ejecuta el robot cada 3 horas. |
+| `.github/workflows/robot.yml` | Ejecuta el robot sin parar (y lo rearranca cada 2 horas si la cadena se corta). |
 | `scripts/` | Generan los datos de aeropuertos y el SQL de instalación. |
 | `docs/` | [Instalación paso a paso](docs/INSTALACION.md) e [investigación](docs/INVESTIGACION.md). |
 

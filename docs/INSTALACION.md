@@ -2,7 +2,7 @@
 
 Todo es gratis. Tardarás unos 30 minutos. Necesitas:
 
-- **GitHub** (ya lo tienes): guarda el código y ejecuta el robot cada 3 horas.
+- **GitHub** (ya lo tienes): guarda el código y ejecuta el robot sin parar (sesiones de casi 6 horas que se encadenan solas).
 - **Supabase**: la base de datos con tu cuenta, tus búsquedas y el historial de precios.
 - **Cloudflare Pages**: aloja la web para que la abras desde el móvil o el PC.
 - **Telegram**: te llegan los avisos.
@@ -22,7 +22,8 @@ Todo es gratis. Tardarás unos 30 minutos. Necesitas:
    - Region: **West EU (Paris)** o **Central EU (Frankfurt)**.
 3. Cuando termine de crearse, ve a **SQL Editor** → **New query**.
 4. Abre el archivo [`supabase/instalar.sql`](../supabase/instalar.sql) de este repositorio. Copia **todo** su contenido, pégalo y pulsa **Run**.
-   Debe terminar con *Success*. Se puede volver a ejecutar sin problema; por ejemplo, tras una actualización.
+   Debe terminar con *Success*. Se puede volver a ejecutar sin problema; **hazlo tras cada actualización**
+   (la versión 2 añade el tiempo real de la web, la señal de vida del robot y el mensaje de prueba de Telegram).
 5. Apunta estos tres datos:
    - **Project URL** (en **Project Settings → Data API**): algo como `https://abcdxyz.supabase.co`.
    - **Publishable key** (en **Project Settings → API Keys**): empieza por `sb_publishable_`. Es pública y va en la web.
@@ -65,9 +66,14 @@ Solo se puede crear **una** cuenta: después el registro se cierra solo.
 1. En Telegram, abre **@BotFather** (tiene el check azul) y envíale `/newbot`.
 2. Elige un nombre (p. ej. *Mis Vuelos*) y un usuario que acabe en `bot` (p. ej. `mis_vuelos_2026_bot`).
 3. BotFather te da un **token** (`123456789:AA...`). Es secreto: guárdalo en GitHub (paso 6), no lo compartas.
-4. Abre el chat con tu bot nuevo (el enlace `t.me/...` que te da BotFather) y pulsa **Iniciar**.
-5. En tu web, ve a **Perfil → Avisos por Telegram** y envía a tu bot el mensaje que aparece (`/start CÓDIGO`).
-   El robot lo vinculará en su siguiente ronda y te contestará "✅ ¡Listo!".
+4. Pon el usuario de tu bot en [`web/js/config.js`](../web/js/config.js) (`BOT_TELEGRAM`, sin la @).
+5. Cuando el robot esté en marcha (paso 6), ve en tu web a **Perfil** y pulsa **Abrir Telegram y vincular**:
+   se abre el chat con tu bot con el código ya puesto; pulsa **Iniciar**. En menos de un minuto te contestará
+   "✅ ¡Listo!" y la tarjeta de la web se pondrá en verde sola.
+   - Si ya habías hablado con el bot, envíale `/start CÓDIGO` (el código que sale en la web).
+   - **Enviar mensaje de prueba** comprueba que los avisos te llegan.
+   - **Volver a vincular** genera un código nuevo (por ejemplo, si cambias de móvil o algo falla).
+   - En el chat puedes escribir `/estado` (resumen de tus búsquedas) o `/ayuda`.
 
 ## 6. Secretos del robot (GitHub)
 
@@ -90,30 +96,39 @@ En la pestaña **Variables**, pulsa **New repository variable**:
 > Esta variable es el **interruptor** del robot: mientras no exista, el robot no se ejecuta
 > (así no gasta minutos ni te llegan correos de error antes de terminar la instalación).
 
-Primera ronda de prueba:
+Arrancar el robot:
 
 1. Ve a **Actions**. Si te lo pide, pulsa **I understand… enable them**.
 2. Elige **Robot de vuelos** → **Run workflow**.
 3. La casilla **"Forzar: revisar ya todas las búsquedas"** ya viene marcada: pulsa el botón verde **Run workflow**.
 
-A partir de ahí el robot se ejecuta solo cada 3 horas.
+A partir de ahí funciona **sin parar**: cada minuto mira Telegram y revisa las búsquedas a las que les toca
+(cada 20 min si el viaje es en menos de 3 semanas, cada 40 si faltan menos de 2 meses y cada 90 si falta más).
+Cada sesión dura casi 6 horas y, al terminar, lanza la siguiente. Además, cada 2 horas GitHub comprueba que haya
+una en marcha y, si la cadena se hubiera cortado, la vuelve a arrancar.
 
 ## 7. Comprobar que todo va bien
 
-- En tu web, la pantalla **Robot** muestra la ronda y el estado de cada web consultada.
-- En Telegram te ha llegado "✅ ¡Listo!", si enviaste el código.
-- Crea una búsqueda: en la siguiente ronda (máximo 3 h) verás precios y, si toca, un aviso.
+- En tu web, el indicador de la barra lateral dice **Robot en directo** y la pantalla **Robot** muestra su actividad.
+- En Telegram te ha llegado "✅ ¡Listo!" y, si lo pediste, el mensaje de prueba.
+- Crea una búsqueda: en uno o dos minutos verás el primer precio. Ábrela con **En directo**: la gráfica, las
+  estadísticas y la lista de cambios de precio se actualizan solas en cuanto el robot encuentra un precio distinto.
 
 ---
 
 ## Mantenimiento
 
-- **Minutos de GitHub**: un repositorio **público** no tiene límite; uno privado tiene 2.000 minutos gratis al mes.
-  En un repositorio público, GitHub desactiva las rondas automáticas tras 60 días sin cambios: el robot sube él solo
-  un cambio vacío cuando hace falta para evitarlo. Cada ronda gasta unos 2-6 minutos,
-  y la pantalla **Robot** muestra el consumo. No son horas de web activa: la web no gasta minutos, solo el robot mientras busca.
-  Si te acercas al límite, crea menos búsquedas simultáneas o pausa las lejanas.
-- **Supabase en pausa**: el plan gratuito pausa los proyectos sin actividad durante 7 días. El robot la usa cada 3 horas,
+- **Minutos de GitHub**: el repositorio es **público**, así que no hay límite de minutos y el robot puede ir sin parar.
+  ⚠️ Si algún día lo pones **privado**, el modo continuo gastaría los 2.000 minutos gratis del mes en día y medio:
+  en `.github/workflows/robot.yml` quita `--continuo 345` (quedará una ronda suelta cada 2 horas).
+  En un repositorio público, GitHub desactiva las ejecuciones programadas tras 60 días sin cambios: el robot sube él solo
+  un cambio vacío cuando hace falta para evitarlo.
+- **Uso razonable de GitHub**: GitHub Actions está pensado para automatizar proyectos, no como servidor 24/7. Un robot
+  ligero como este (unas pocas peticiones cada pocos minutos) no suele dar problemas, pero GitHub podría limitarlo.
+  Si pasara, la alternativa es la misma configuración con una ronda cada 2 horas (ver el punto anterior).
+- **Si el robot se para** (la web dice *Robot en pausa* durante más de una hora): GitHub → **Actions** →
+  **Robot de vuelos** → **Run workflow**. Si una sesión falla, el registro de esa ejecución dice por qué.
+- **Supabase en pausa**: el plan gratuito pausa los proyectos sin actividad durante 7 días. El robot la usa cada minuto,
   así que no debería pasar; si pasara, entra en supabase.com y pulsa **Restore**.
 - **Si Google Flights deja de funcionar** (búsquedas con "no se han encontrado vuelos" y, en el registro de la ronda,
   `Google no devolvió vuelos` o `error 13`): Google ha vuelto a cambiar su sistema. La librería `flights` (fli) suele
