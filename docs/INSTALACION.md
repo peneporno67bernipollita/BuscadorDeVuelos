@@ -94,7 +94,7 @@ Primera ronda de prueba:
 
 1. Ve a **Actions**. Si te lo pide, pulsa **I understand… enable them**.
 2. Elige **Robot de vuelos** → **Run workflow**.
-3. Marca **forzar** y pulsa **Run workflow**.
+3. La casilla **"Forzar: revisar ya todas las búsquedas"** ya viene marcada: pulsa el botón verde **Run workflow**.
 
 A partir de ahí el robot se ejecuta solo cada 3 horas.
 
@@ -108,7 +108,9 @@ A partir de ahí el robot se ejecuta solo cada 3 horas.
 
 ## Mantenimiento
 
-- **Minutos de GitHub**: un repositorio privado tiene 2.000 minutos gratis al mes. Cada ronda gasta unos 2-6 minutos,
+- **Minutos de GitHub**: un repositorio **público** no tiene límite; uno privado tiene 2.000 minutos gratis al mes.
+  En un repositorio público, GitHub desactiva las rondas automáticas tras 60 días sin cambios: el robot sube él solo
+  un cambio vacío cuando hace falta para evitarlo. Cada ronda gasta unos 2-6 minutos,
   y la pantalla **Robot** muestra el consumo. No son horas de web activa: la web no gasta minutos, solo el robot mientras busca.
   Si te acercas al límite, crea menos búsquedas simultáneas o pausa las lejanas.
 - **Supabase en pausa**: el plan gratuito pausa los proyectos sin actividad durante 7 días. El robot la usa cada 3 horas,

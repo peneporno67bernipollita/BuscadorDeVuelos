@@ -86,7 +86,7 @@ export async function vistaPanel(app) {
     <div class="cifras">
       <div class="cifra"><div class="valor">${activas.length}</div><div class="etiqueta">búsquedas activas</div></div>
       <div class="cifra"><div class="valor">${avisosSemana}</div><div class="etiqueta">avisos en 7 días</div></div>
-      <div class="cifra"><div class="valor">${minutos}<span class="suave pequeno"> / ${LIMITE_MINUTOS}</span></div><div class="etiqueta">minutos de GitHub este mes (aprox.)</div></div>
+      <div class="cifra"><div class="valor">${minutos}<span class="suave pequeno"> / ${LIMITE_MINUTOS}</span></div><div class="etiqueta">minutos de GitHub este mes (aprox.; sin límite si el repositorio es público)</div></div>
     </div>
     <p class="fila pequeno">${fuentesTexto} <a href="#/estado">Ver robot</a></p>
     ${busquedas.length

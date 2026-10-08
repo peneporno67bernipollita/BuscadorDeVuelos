@@ -80,11 +80,16 @@ function grafica(canvas, historial, presupuesto) {
 }
 
 export async function vistaDetalle(app, id) {
-  const [b, historialTodo, opciones, avisos, listaAerolineas, datos] = await Promise.all([
+  const [b, historialTodo, opcionesTodas, avisos, listaAerolineas, datos] = await Promise.all([
     api.busqueda(id), api.historial(id), api.ultimasOpciones(id), api.avisos(id), api.aerolineas(), aeropuertos(),
   ]);
   if (!b) throw new Error("Esa búsqueda no existe.");
   const historial = b.historial_desde ? historialTodo.filter((h) => h.revisado >= b.historial_desde) : historialTodo;
+  // Tras editar el viaje, las opciones guardadas antes ya no valen
+  const opciones = b.historial_desde ? opcionesTodas.filter((o) => o.revisado >= b.historial_desde) : opcionesTodas;
+  // Si la última revisión no dejó opciones válidas, las guardadas son de una revisión anterior
+  const opcionesAntiguas = opciones.length && b.ultima_revision
+    && new Date(b.ultima_revision) - new Date(opciones[0].revisado) > 10 * 60000;
   const aerolineas = new Map(listaAerolineas.map((a) => [a.codigo, a]));
   const info = b.info || {};
   const rechazos = Object.entries(info.rechazos || {});
@@ -129,7 +134,9 @@ export async function vistaDetalle(app, id) {
     <section class="tarjeta">
       <h2>✈️ Mejores opciones de la última revisión</h2>
       ${opciones.length
-        ? `<p class="pequeno suave">Revisado el ${fechaHora(opciones[0].revisado)}. Precio total para todos los pasajeros. Compra siempre en la web oficial
+        ? `${opcionesAntiguas ? `<div class="nota alerta">Ojo: estas opciones son de la revisión del ${fechaHora(opciones[0].revisado)}.
+             En la última revisión (${fechaHora(b.ultima_revision)}) no hubo ninguna válida: ${esc(b.estado || "")}</div>` : ""}
+           <p class="pequeno suave">Revisado el ${fechaHora(opciones[0].revisado)}. Precio total para todos los pasajeros. Compra siempre en la web oficial
            y comprueba el precio final antes de pagar.</p>${opciones.map((p, i) => tarjetaOpcion(p, aerolineas, i === 0)).join("")}`
         : '<p class="suave">Todavía no hay resultados. El robot revisará esta búsqueda en su próxima ronda (cada 3 horas).</p>'}
     </section>

@@ -24,6 +24,8 @@ jobs:
     if: ${{ vars.URL_WEB != '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: write  # solo para el paso "Mantener activas las rondas automáticas"
     steps:
       - uses: actions/checkout@v7
 
@@ -49,3 +51,17 @@ jobs:
           URL_WEB: ${{ vars.URL_WEB }}
           FORZAR: ${{ inputs.forzar && '1' || '' }}
         run: python -m buscador.run
+
+      # En un repositorio público, GitHub desactiva las rondas automáticas tras 60 días sin
+      # actividad. Si el último cambio tiene más de 50 días, se sube un commit vacío.
+      - name: Mantener activas las rondas automáticas
+        if: ${{ !cancelled() && github.event_name == 'schedule' }}
+        run: |
+          dias=$(( ( $(date +%s) - $(git log -1 --format=%ct) ) / 86400 ))
+          echo "Último cambio hace $dias días"
+          if [ "$dias" -ge 50 ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit --allow-empty -m "Mantener activas las rondas automáticas del robot"
+            git push
+          fi

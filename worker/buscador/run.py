@@ -22,7 +22,7 @@ from . import enlaces
 from .avisos import Telegram, codigo_en_mensaje, eur, mensaje_aviso
 from .db import Supabase
 from .decision import decidir, minutos_hasta_siguiente_revision
-from .filtros import Validador
+from .filtros import Validador, franja
 from .modelos import Opcion
 from .nucleo import consultar, crear_fuentes, evaluar
 
@@ -51,6 +51,11 @@ def _registrar_fuentes(estado: dict, resultados: dict) -> None:
         )
         for error in est["errores"][:3]:
             log.warning("%s: %s", nombre, _sin_urls(error))
+
+
+def _tiene_franjas(b: dict) -> bool:
+    sentidos = ("ida", "vuelta") if b.get("ida_vuelta") else ("ida",)
+    return any(franja(b, s) != (0, 24, 0, 24) for s in sentidos)
 
 
 def _fecha_hora(valor: str | None) -> datetime | None:
@@ -150,8 +155,17 @@ def procesar_busqueda(
     url_web: str | None,
     hoy: date,
     ahora: datetime,
+    errores: list[str] | None = None,
 ) -> bool:
     """Guarda el historial, decide si avisar y actualiza la búsqueda. Devuelve True si avisó."""
+    if not validas and not rechazos and errores:
+        # Ninguna web pudo responder: no es que no haya vuelos. Se reintenta en la siguiente ronda.
+        db.actualizar("busquedas", {"id": f"eq.{b['id']}"}, {
+            "ultima_revision": ahora.isoformat(),
+            "proxima_revision": (ahora + timedelta(minutes=170)).isoformat(),
+            "estado": "No se pudo consultar en esta ronda: " + _sin_urls(errores[0])[:150],
+        })
+        return False
     filtros_historial = {"busqueda": f"eq.{b['id']}", "es_mejor": "eq.true", "select": "precio_total",
                          "order": "revisado.asc", "limit": 500}
     if b.get("historial_desde"):  # tras editar el viaje, el historial anterior no se compara
@@ -213,6 +227,8 @@ def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     # httpx registra cada URL pedida (rutas, fechas...): no debe aparecer en registros públicos
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    # fli escribe fechas de viaje en sus avisos; los fallos ya se resumen sin datos personales
+    logging.getLogger("fli").setLevel(logging.ERROR)
     url, clave = os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_SERVICE_KEY")
     # Diagnóstico sin revelar nada: solo si cada dato de configuración existe o no
     hay = lambda nombre: "sí" if os.environ.get(nombre) else "NO"
@@ -303,14 +319,16 @@ def main() -> int:
                 por_fuente = resultados.get(b["id"], {})
                 if not por_fuente:
                     db.actualizar("busquedas", {"id": f"eq.{b['id']}"},
-                                  {"estado": "En espera: ninguna web disponible en esta ronda"})
+                                  {"estado": "Pendiente: no dio tiempo en esta ronda, se revisará en la siguiente"})
                     continue
                 info = dict(b.get("info") or {})
                 if "ryanair" in por_fuente:
                     info["ryanair_ultima"] = ahora.isoformat()
                     r = por_fuente["ryanair"]
-                    if not r.opciones and not r.error:
-                        info["ryanair_sin_ruta_hasta"] = (hoy + timedelta(days=7)).isoformat()
+                    # Sin tarifas en una consulta real y sin franjas horarias: Ryanair no vuela esa ruta
+                    # (con franjas, o fechas sin vuelo ese día, la respuesta también sale vacía)
+                    if r.peticiones and not r.opciones and not r.error and not _tiene_franjas(b):
+                        info["ryanair_sin_ruta_hasta"] = (hoy + timedelta(days=3)).isoformat()
                 if b["modo"] == "chollo" and "google_flights" in por_fuente:
                     acumular_calendario(info, por_fuente["google_flights"].calendario, hoy)
                 b["info"] = info
@@ -321,8 +339,9 @@ def main() -> int:
                         calendario = [precio for precio, _visto in (info.get("calendario") or {}).values()]
                     log.info("Búsqueda %s…: %s opción(es) válida(s); descartadas: %s",
                              b["id"][:8], len(validas), dict(rechazos) or "ninguna")
+                    errores_busqueda = [r.error for r in por_fuente.values() if r.error and not r.opciones]
                     if procesar_busqueda(db, b, validas, rechazos, calendario, list(por_fuente), perfiles.get(b["usuario"]),
-                                         aerolineas, tg, url_web, hoy, ahora):
+                                         aerolineas, tg, url_web, hoy, ahora, errores_busqueda):
                         resumen["avisos"] += 1
                     resumen["revisadas"] += 1
                 except Exception as e:

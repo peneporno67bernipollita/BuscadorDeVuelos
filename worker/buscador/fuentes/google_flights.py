@@ -45,6 +45,7 @@ LOCALE = {"currency": "EUR", "language": "es", "country": "ES"}
 ESCALAS = {0: MaxStops.NON_STOP, 1: MaxStops.ONE_STOP_OR_FEWER, 2: MaxStops.TWO_OR_FEWER_STOPS}
 MAX_DIAS_FUTURO = 300  # Google no busca más allá de ~305 días
 FECHAS_CHOLLO_POR_RONDA = 8  # páginas de calendario por búsqueda chollo y ronda
+PROPORCION_AUREA = 0.6180339887498949
 
 
 def _codigo(aerolinea) -> str:
@@ -322,23 +323,44 @@ class GoogleFlights:
         manana = date.today() + timedelta(days=1)
         desde = max(date.fromisoformat(str(b["chollo_desde"])), manana)
         hasta = min(date.fromisoformat(str(b["chollo_hasta"])), date.today() + timedelta(days=MAX_DIAS_FUTURO))
+        noches_posibles = [None]
         if b.get("ida_vuelta"):
             n_min, n_max = b["noches_min"], b["noches_max"]
             noches_posibles = sorted({n_min, (n_min + n_max) // 2, n_max})
-        else:
-            noches_posibles = [None]
-        candidatos = [
-            (desde + timedelta(days=i), n)
+        # Fechas de salida posibles (con ida y vuelta, que quepa al menos la estancia mínima)
+        fechas = [
+            desde + timedelta(days=i)
             for i in range((hasta - desde).days + 1)
-            for n in noches_posibles
-            if n is None or desde + timedelta(days=i + n) <= hasta
+            if noches_posibles[0] is None or desde + timedelta(days=i + noches_posibles[0]) <= hasta
         ]
-        if not candidatos:
+        if not fechas:
             return []
+        # Secuencia de Weyl (proporción áurea): reparte las fechas por todo el periodo y por todos
+        # los días de la semana, y cada ronda continúa donde lo dejó la anterior. Un salto fijo
+        # (p. ej. de 7 días) caería siempre en el mismo día de la semana, y si la aerolínea no
+        # vuela ese día no se vería nunca ningún precio.
+        # Además, cada fecha se mueve como mucho 3 días para caer en un día de la semana distinto
+        # de las demás: así, de 8 fechas, 7 son de días distintos aunque la ruta no se vuele a diario.
         turno = int((b.get("info") or {}).get("chollo_turno", 0))
-        salto = max(1, len(candidatos) // FECHAS_CHOLLO_POR_RONDA)
-        elegidos = {(turno + i * salto) % len(candidatos) for i in range(FECHAS_CHOLLO_POR_RONDA)}
-        return [candidatos[i] for i in sorted(elegidos)]
+        elegidas: set[int] = set()
+        for i in range(FECHAS_CHOLLO_POR_RONDA):
+            k = turno * FECHAS_CHOLLO_POR_RONDA + i
+            base = int(((k * PROPORCION_AUREA) % 1) * len(fechas))
+            dia_semana = k % 7
+            for desplazamiento in (0, 1, -1, 2, -2, 3, -3):
+                j = base + desplazamiento
+                if 0 <= j < len(fechas) and fechas[j].weekday() == dia_semana:
+                    base = j
+                    break
+            elegidas.add(base)
+        elegidas = sorted(elegidas)
+        muestras = []
+        for j, k in enumerate(elegidas):
+            fi = fechas[k]
+            # La duración de la estancia también va rotando entre la mínima, la media y la máxima
+            caben = [n for n in noches_posibles if n is None or fi + timedelta(days=n) <= hasta]
+            muestras.append((fi, caben[(turno + j) % len(caben)]))
+        return muestras
 
     def buscar(self, b: dict, validador: filtros.Validador) -> ResultadoFuente:
         self.nueva_sesion_privada()
@@ -378,7 +400,7 @@ class GoogleFlights:
             vistos = {(c.fecha_ida, c.fecha_vuelta): c.precio for c in calendario_guardado(b)}
             vistos.update({(c.fecha_ida, c.fecha_vuelta): c.precio for c in res.calendario})
             futuros = [(precio, par) for par, precio in vistos.items() if par[0] > date.today()]
-            pares = [min(futuros)[1]] if futuros else []
+            pares = [min(futuros, key=lambda x: x[0])[1]] if futuros else []
 
         hoy = date.today()
         for fi, fv in pares:

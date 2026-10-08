@@ -208,8 +208,16 @@ def test_muestras_y_calendario_acumulado_del_chollo():
         assert 0 < len(muestras) <= FECHAS_CHOLLO_POR_RONDA
         for fi, noches in muestras:
             assert fi + timedelta(days=noches) <= hoy + timedelta(days=95)
+        # En cada ronda, fechas de días de la semana distintos (no siempre el mismo)
+        assert len({fi.weekday() for fi, _ in muestras}) >= 4
         vistas |= set(muestras)
-    assert len(vistas) > 250  # la rotación acaba cubriendo casi todo el periodo
+    assert len({fi for fi, _ in vistas}) > 80  # en 40 rondas se ha mirado casi cada día del periodo
+
+    solo_ida = busqueda(modo="chollo", ida_vuelta=False, chollo_desde=(hoy + timedelta(days=20)).isoformat(),
+                        chollo_hasta=(hoy + timedelta(days=80)).isoformat(), info={})
+    for turno in range(10):
+        solo_ida["info"]["chollo_turno"] = turno
+        assert len({fi.weekday() for fi, _ in GoogleFlights._muestras_chollo(solo_ida)}) >= 4
 
     info = {"calendario": {"2000-01-01|2000-01-03": [10, "2000-01-01"]}}  # pasada: se descarta
     acumular_calendario(info, [PrecioCalendario(hoy + timedelta(days=9), hoy + timedelta(days=12), 80.0)], hoy)
