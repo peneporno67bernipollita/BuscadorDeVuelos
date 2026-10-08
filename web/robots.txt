@@ -1,0 +1,3 @@
+# Web privada: que no la indexe ningún buscador
+User-agent: *
+Disallow: /
