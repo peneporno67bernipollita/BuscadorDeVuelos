@@ -41,7 +41,7 @@ function crearDatos() {
   const penultimo = (id) => historial.filter((h) => h.busqueda === id).at(-2).precio_total;
   const minimo = (id) => Math.min(...historial.filter((h) => h.busqueda === id).map((h) => h.precio_total));
   const comun = {
-    usuario: "demo", flex_dias: 0, chollo_desde: null, chollo_hasta: null, noches_min: null, noches_max: null,
+    usuario: "demo", origenes_extra: [], destinos_extra: [], flex_dias: 0, chollo_desde: null, chollo_hasta: null, noches_min: null, noches_max: null,
     ida_salida_min: 0, ida_salida_max: 24, ida_llegada_min: 0, ida_llegada_max: 24,
     vuelta_salida_min: 0, vuelta_salida_max: 24, vuelta_llegada_min: 0, vuelta_llegada_max: 24,
     ninos: 0, bebes: 0, maletas_cabina: 0, maletas_20kg: 0, aplicar_descuentos: true, escalas_max: 1, escala_max_horas: 6,
@@ -49,7 +49,7 @@ function crearDatos() {
   };
   const busquedas = [
     {
-      ...comun, id: "demo-1", nombre: "Puente en París", modo: "fechas", ida_vuelta: true, origen: "SVQ", destino: "ORY",
+      ...comun, id: "demo-1", nombre: "Puente en París", modo: "fechas", ida_vuelta: true, origen: "SVQ", destino: "ORY", origenes_extra: ["XRY"],
       fecha_ida: soloFecha(ida1), fecha_vuelta: soloFecha(vuelta1), flex_dias: 1, ida_salida_min: 6, ida_salida_max: 14,
       adultos: 2, ninos: 1, maletas_cabina: 1, maletas_20kg: 1, escala_max_horas: 4, modo_precio: "presupuesto", presupuesto: 600,
       proxima_revision: iso(ahora + 14 * MIN), ultima_revision: iso(ahora - 6 * MIN),
@@ -83,6 +83,10 @@ function crearDatos() {
       desglose_maletas: maletas ? ["Ida (Vueling): (1 cabina × 50,00 € + 1 de 20 kg × 96,00 €) = 146,00 €"] : [],
       notas: [], enlaces: [{ aerolinea: "Vueling", url: "https://www.vueling.com" }, { aerolinea: "Transavia France", url: "https://www.transavia.com" }],
       google_flights: "https://www.google.com/travel/flights?q=Flights%20to%20ORY%20from%20SVQ",
+      comprar: separados
+        ? [{ texto: "Comprar la ida", url: "https://www.google.com/travel/flights?q=One%20way%20flights%20to%20ORY%20from%20SVQ" },
+          { texto: "Comprar la vuelta", url: "https://www.google.com/travel/flights?q=One%20way%20flights%20to%20SVQ%20from%20ORY" }]
+        : [{ texto: "Comprar ya", url: "https://www.google.com/travel/flights?q=Flights%20to%20ORY%20from%20SVQ" }],
     },
   });
   const p1 = ultimo("demo-1");

@@ -207,6 +207,7 @@ def _fila_precio(b: dict, op: Opcion, es_mejor: bool, aerolineas: dict) -> dict:
     detalle = op.a_dict()
     detalle["enlaces"] = enlaces.compra(b, op, aerolineas)
     detalle["google_flights"] = enlaces.google_flights(b, op)
+    detalle["comprar"] = enlaces.comprar_ya(b, op)
     return {
         "busqueda": b["id"],
         "usuario": b["usuario"],
@@ -291,6 +292,7 @@ def procesar_busqueda(
         texto = mensaje_aviso(
             b, mejor, decision, enlaces.compra(b, mejor, aerolineas), enlaces.google_flights(b, mejor), aerolineas,
             f"{url_web.rstrip('/')}/#/busqueda/{b['id']}" if url_web else None,
+            comprar=enlaces.comprar_ya(b, mejor),
         )
         chat = (perfil or {}).get("telegram_chat_id")
         entregado = bool(tg and chat and tg.enviar(chat, texto))

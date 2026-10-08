@@ -26,6 +26,9 @@ BAJADA_MINIMA_EUR = 10.0  # ...o al menos 10 €
 # para darlo por bueno hace falta haber observado el precio durante un tiempo.
 HORAS_PARA_MINIMO = 6
 HORAS_PARA_CHOLLO_ANTICIPADO = 24
+# Bajada fuerte: avisar aunque no sea "el momento" ni llegue a tu objetivo (p. ej. de 171 € a 70 €)
+BAJADA_FUERTE_PCT = 0.15
+BAJADA_FUERTE_EUR = 15.0
 
 
 @dataclass
@@ -51,6 +54,23 @@ def _percentil(valores: list[float], p: float) -> float:
 
 def _eur(x: float) -> str:
     return f"{x:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def _bajada_fuerte(total: float, historial: list[float], contexto: dict) -> Decision | None:
+    """Precio claramente por debajo de todo lo visto hasta ahora en esta búsqueda."""
+    if not historial:
+        return None
+    minimo = min(historial)
+    if total <= minimo * (1 - BAJADA_FUERTE_PCT) and minimo - total >= BAJADA_FUERTE_EUR:
+        pct = round((minimo - total) / minimo * 100)
+        return Decision(
+            True, "bajada_fuerte", "📉 ¡Bajada fuerte de precio!",
+            f"Ahora {_eur(total)}: {_eur(minimo - total)} menos (−{pct} %) que lo más barato visto hasta ahora "
+            f"({_eur(minimo)}). Si te encaja, puede ser buen momento para comprar.",
+            # No cuenta como "precio avisado": tus avisos normales (objetivo, buen momento...) siguen igual
+            fija_precio=False, contexto=contexto,
+        )
+    return None
 
 
 def decidir(
@@ -111,7 +131,7 @@ def decidir(
                 "Sigo vigilando por si baja.",
                 fija_precio=False, contexto=contexto,
             )
-        return Decision(False, contexto=contexto)
+        return _bajada_fuerte(total, historial, contexto) or Decision(False, contexto=contexto)
 
     # --- Modo chollo (cualquier fecha) y "lo más barato posible" ---
     if not modo_fechas:
@@ -131,7 +151,7 @@ def decidir(
                 f"{_eur(total)}: un 20 % por debajo de lo que he visto hasta ahora en esta ruta.",
                 contexto=contexto,
             )
-        return Decision(False, contexto=contexto)
+        return _bajada_fuerte(total, historial, contexto) or Decision(False, contexto=contexto)
 
     # --- Modo fechas y "lo más barato posible" ---
     if dias <= DIAS_VIAJE_PROXIMO:
@@ -168,7 +188,7 @@ def decidir(
                 f"más barata ({dias} días antes).",
                 contexto=contexto,
             )
-        return Decision(False, contexto=contexto)
+        return _bajada_fuerte(total, historial, contexto) or Decision(False, contexto=contexto)
 
     # Todavía es pronto: solo se avisa si es algo excepcional
     if len(historial) >= 6 and horas_historial >= HORAS_PARA_CHOLLO_ANTICIPADO and total <= median(historial) * 0.80:
@@ -184,7 +204,7 @@ def decidir(
             "en fechas cercanas.",
             contexto=contexto,
         )
-    return Decision(False, contexto=contexto)
+    return _bajada_fuerte(total, historial, contexto) or Decision(False, contexto=contexto)
 
 
 # Cada cuántos minutos se revisa una búsqueda (el robot funciona sin parar).
@@ -193,14 +213,13 @@ def decidir(
 REVISION_PROXIMO_MIN = 20  # viaje en menos de 3 semanas
 REVISION_MEDIO_MIN = 40  # viaje en menos de 2 meses
 REVISION_LEJANO_MIN = 90  # viaje en más de 2 meses
-REVISION_CHOLLO_MIN = 60  # chollo (cada revisión mira 8 fechas)
 
 
 def minutos_hasta_siguiente_revision(busqueda: dict, hoy: date) -> int:
-    """Cuanto más cerca está el viaje, más a menudo se revisa."""
-    if busqueda["modo"] != "fechas":
-        return REVISION_CHOLLO_MIN
-    dias = (date.fromisoformat(str(busqueda["fecha_ida"])) - hoy).days
+    """Cuanto más cerca está el viaje, más a menudo se revisa (en un chollo cuenta el inicio del periodo:
+    cada revisión mira 8 fechas nuevas, así que revisar a menudo también cubre antes todo el periodo)."""
+    salida = busqueda["fecha_ida"] if busqueda["modo"] == "fechas" else busqueda["chollo_desde"]
+    dias = (date.fromisoformat(str(salida)) - hoy).days
     if dias <= DIAS_VIAJE_PROXIMO:
         return REVISION_PROXIMO_MIN
     if dias <= 60:

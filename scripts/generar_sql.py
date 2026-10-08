@@ -44,14 +44,16 @@ def main() -> None:
     )
     # Resultado visible al final: si salen 8 tablas y 77 aerolíneas, todo ha ido bien
     comprobacion = (
-        "\n-- Comprobación final (debe salir: 8 tablas, 77 aerolíneas, 3 webs, versión 2 = 1)\n"
+        "\n-- Comprobación final (debe salir: 8 tablas, 77 aerolíneas, 3 webs, versión 2 = 1, versión 3 = 2)\n"
         "select 'Tablas creadas' as comprobacion, count(*) as total from information_schema.tables\n"
         "  where table_schema = 'public' and table_name in\n"
         "  ('perfiles','busquedas','precios','avisos','aerolineas','estado_fuentes','ejecuciones','ajustes')\n"
         "union all select 'Aerolíneas en la lista blanca', count(*) from public.aerolineas\n"
         "union all select 'Webs configuradas', count(*) from public.estado_fuentes\n"
         "union all select 'Versión 2 instalada (tiempo real y Telegram)', count(*) from information_schema.columns\n"
-        "  where table_schema = 'public' and table_name = 'perfiles' and column_name = 'telegram_prueba';\n"
+        "  where table_schema = 'public' and table_name = 'perfiles' and column_name = 'telegram_prueba'\n"
+        "union all select 'Versión 3 instalada (varios aeropuertos)', count(*) from information_schema.columns\n"
+        "  where table_schema = 'public' and table_name = 'busquedas' and column_name in ('origenes_extra', 'destinos_extra');\n"
     )
     SALIDA.write_text(ESQUEMA.read_text(encoding="utf-8") + semilla + comprobacion, encoding="utf-8")
     print(f"{SALIDA} generado con {len(aerolineas)} aerolíneas")

@@ -166,7 +166,8 @@ class GoogleFlights:
         return any(filtros.franja(b, s) != (0, 24, 0, 24) for s in sentidos)
 
     def _segmento(self, b: dict, sentido: str, fecha: date, con_horas: bool = True) -> FlightSegment:
-        o, d = (b["origen"], b["destino"]) if sentido == "ida" else (b["destino"], b["origen"])
+        origenes, destinos = filtros.aeropuertos_busqueda(b)
+        o, d = (origenes, destinos) if sentido == "ida" else (destinos, origenes)
         sal_min, sal_max, lle_min, lle_max = filtros.franja(b, sentido) if con_horas else (0, 24, 0, 24)
         horas = TimeRestrictions(
             earliest_departure=sal_min or None,
@@ -176,8 +177,9 @@ class GoogleFlights:
         )
         tiene_horas = any(v is not None for v in horas.model_dump().values())
         return FlightSegment(
-            departure_airport=[[self._aeropuerto(o), 0]],
-            arrival_airport=[[self._aeropuerto(d), 0]],
+            # Google busca desde (y hasta) todos tus aeropuertos a la vez, con una sola petición
+            departure_airport=[[self._aeropuerto(c), 0] for c in o],
+            arrival_airport=[[self._aeropuerto(c), 0] for c in d],
             travel_date=fecha.isoformat(),
             time_restrictions=horas if tiene_horas else None,
         )

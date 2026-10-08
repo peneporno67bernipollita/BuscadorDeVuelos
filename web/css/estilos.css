@@ -564,6 +564,21 @@ input[type="date"] { min-height: 46px; }
   .intercambiar:hover { transform: rotate(270deg); }
 }
 
+.extras { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .5rem; }
+.extras:empty, .cercanos:empty { display: none; }
+.chip .quitar { width: 20px; height: 20px; padding: 0; margin: 0 -.25rem 0 .1rem; border: 0; border-radius: 50%; background: transparent; color: inherit; }
+.chip .quitar svg { width: 12px; height: 12px; }
+.chip .quitar:hover { background: var(--superficie-3); transform: none; }
+.cercanos { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; margin-top: .45rem; font-size: .76rem; }
+.cercanos .chip { font: inherit; font-weight: 650; cursor: pointer; white-space: normal; text-align: left; max-width: 100%; }
+.extras .chip { white-space: normal; max-width: 100%; }
+.cercanos .chip:hover { color: var(--primario); border-color: var(--primario); transform: none; }
+.ruta .alternativos { font-size: .72rem; font-weight: 750; color: var(--primario); margin-top: .15rem; }
+.ruta .aeropuerto.fin .alternativos { text-align: right; }
+.fila-compra { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: .7rem; margin: -.2rem 0 1rem; }
+.fila-compra .veredicto { margin: 0; }
+.fila-compra .acciones:empty { display: none; }
+
 .resumen-lateral { position: sticky; top: 1.5rem; }
 .resumen-lateral ul { list-style: none; padding: 0; margin: 0 0 1rem; display: flex; flex-direction: column; gap: .7rem; }
 .resumen-lateral li { display: flex; gap: .65rem; font-size: .88rem; }

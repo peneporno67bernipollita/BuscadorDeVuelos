@@ -9,6 +9,7 @@ import httpx
 
 from . import aeropuertos
 from .decision import Decision
+from .filtros import aeropuertos_busqueda
 from .modelos import Opcion, Trayecto
 
 log = logging.getLogger(__name__)
@@ -53,6 +54,12 @@ def _linea_trayecto(etiqueta: str, tr: Trayecto, aerolineas: dict[str, dict]) ->
     )
 
 
+def ruta_txt(b: dict) -> str:
+    """"Sevilla (SVQ) o Jerez (XRY) → París Orly (ORY)"."""
+    origenes, destinos = aeropuertos_busqueda(b)
+    return " o ".join(map(aeropuertos.nombre, origenes)) + " → " + " o ".join(map(aeropuertos.nombre, destinos))
+
+
 def pasajeros_txt(b: dict) -> str:
     partes = [f"{b['adultos']} adulto{'s' if b['adultos'] != 1 else ''}"]
     if b.get("ninos"):
@@ -75,8 +82,9 @@ def mensaje_aviso(
     enlace_google: str,
     aerolineas: dict[str, dict],
     url_web: str | None,
+    comprar: list[dict] | None = None,
 ) -> str:
-    ruta = f"{aeropuertos.nombre(b['origen'])} → {aeropuertos.nombre(b['destino'])}"
+    ruta = ruta_txt(b)
     lineas = [
         f"<b>{_e(decision.titulo)}</b>",
         f"<b>{_e(b['nombre'])}</b>",
@@ -105,7 +113,11 @@ def mensaje_aviso(
         lineas.append("⚠️ Ida y vuelta son billetes separados: tienes que comprar los dos.")
     for nota in op.notas:
         lineas.append(f"ℹ️ {_e(nota)}")
-    lineas += ["", "🛒 <b>Comprar en la web oficial:</b>"]
+    if comprar:
+        lineas += ["", "🛒 <b>Comprar ya (Google Flights, con estos vuelos elegidos):</b>"]
+        for e in comprar:
+            lineas.append(f'👉 <a href="{_e(e["url"])}">{_e(e["texto"])}</a>')
+    lineas += ["", "🏢 <b>O en la web oficial:</b>"]
     for e in enlaces_compra:
         lineas.append(f'• <a href="{_e(e["url"])}">{_e(e["aerolinea"])}</a>')
     lineas.append(f'🔎 <a href="{_e(enlace_google)}">Ver estos vuelos en Google Flights</a>')
@@ -151,7 +163,7 @@ def mensaje_estado(busquedas: list[dict], url_web: str | None) -> str:
         return "No tienes ninguna búsqueda activa. Créala en tu web" + (f": {_e(url_web)}" if url_web else ".")
     lineas = [f"📋 <b>Tus búsquedas</b> ({len(activas)})", ""]
     for b in activas:
-        ruta = f"{aeropuertos.nombre(b['origen'])} → {aeropuertos.nombre(b['destino'])}"
+        ruta = ruta_txt(b)
         if b.get("precio_actual") is not None:
             precio = f"💶 <b>{eur(float(b['precio_actual']))}</b>"
             if b.get("mejor_precio") is not None:

@@ -226,3 +226,50 @@ def test_muestras_y_calendario_acumulado_del_chollo():
     assert list(info["calendario"]) == [f"{hoy + timedelta(days=9)}|{hoy + timedelta(days=12)}"]
     assert info["chollo_turno"] == 1
     assert calendario_guardado({"info": info})[0].precio == 80.0
+
+
+# ---------------- versión 3: varios aeropuertos, bajada fuerte, comprar ya ----------------
+
+def test_varios_aeropuertos_de_salida_y_llegada():
+    b = busqueda(origenes_extra=["XRY"], destinos_extra=["CDG"])
+    v = Validador(b, AEROLINEAS)
+    desde_jerez = Opcion("p", Trayecto([tramo("FR", "XRY", "CDG", IDA)]), Trayecto([tramo("FR", "ORY", "SVQ", VUELTA)]), 90)
+    assert v.opcion(desde_jerez) is None  # sale de Jerez, llega a CDG y vuelve de Orly a Sevilla: todo vale
+    desde_madrid = Opcion("p", Trayecto([tramo("FR", "MAD", "ORY", IDA)]), Trayecto([tramo("FR", "ORY", "SVQ", VUELTA)]), 90)
+    assert "MAD" in v.opcion(desde_madrid) and "SVQ / XRY" in v.opcion(desde_madrid)
+    sin_extras = Validador(busqueda(), AEROLINEAS)
+    assert sin_extras.opcion(desde_jerez) is not None  # sin aeropuertos extra, solo vale el exacto
+
+
+def test_ruta_con_varios_aeropuertos_en_los_mensajes():
+    from buscador.avisos import ruta_txt
+    texto = ruta_txt(busqueda(origenes_extra=["XRY", "SVQ"]))  # el repetido no se duplica
+    assert texto.count("SVQ") == 1 and "XRY" in texto and " o " in texto and "ORY" in texto
+
+
+def test_bajada_fuerte_avisa_aunque_no_llegue_al_objetivo():
+    b = busqueda(modo_precio="presupuesto", presupuesto=30)
+    d = decidir(b, _con_total(70), [171, 172, 171], [], date(2026, 9, 1))
+    assert d.avisar and d.tipo == "bajada_fuerte" and d.fija_precio is False and "171" in d.motivo
+    # Un vaivén normal no es una bajada fuerte
+    assert decidir(b, _con_total(165), [171, 172, 171], [], date(2026, 9, 1)).avisar is False
+    # Si llega al objetivo, manda el aviso de objetivo (más importante)
+    assert decidir(b, _con_total(29), [171], [], date(2026, 9, 1)).tipo == "presupuesto"
+
+
+def test_chollo_cercano_se_revisa_cada_20_minutos():
+    from buscador.decision import minutos_hasta_siguiente_revision
+    hoy = date(2026, 10, 8)
+    cerca = busqueda(modo="chollo", chollo_desde="2026-10-09", chollo_hasta="2026-10-28")
+    lejos = busqueda(modo="chollo", chollo_desde="2027-02-01", chollo_hasta="2027-03-01")
+    assert minutos_hasta_siguiente_revision(cerca, hoy) == 20
+    assert minutos_hasta_siguiente_revision(lejos, hoy) == 90
+
+
+def test_enlaces_comprar_ya_en_google_flights():
+    from buscador.enlaces import comprar_ya
+    juntos = comprar_ya(busqueda(), opcion_directa())
+    assert len(juntos) == 1 and juntos[0]["url"].startswith("https://www.google.com/travel/flights/booking?tfs=")
+    separados = opcion_directa()
+    separados.billetes_separados = True
+    assert [e["texto"] for e in comprar_ya(busqueda(), separados)] == ["Comprar la ida", "Comprar la vuelta"]

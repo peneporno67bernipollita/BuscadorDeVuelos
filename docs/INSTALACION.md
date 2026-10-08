@@ -23,7 +23,9 @@ Todo es gratis. Tardarás unos 30 minutos. Necesitas:
 3. Cuando termine de crearse, ve a **SQL Editor** → **New query**.
 4. Abre el archivo [`supabase/instalar.sql`](../supabase/instalar.sql) de este repositorio. Copia **todo** su contenido, pégalo y pulsa **Run**.
    Debe terminar con *Success*. Se puede volver a ejecutar sin problema; **hazlo tras cada actualización**
-   (la versión 2 añade el tiempo real de la web, la señal de vida del robot y el mensaje de prueba de Telegram).
+   (la versión 2 añade el tiempo real de la web, la señal de vida del robot y el mensaje de prueba de Telegram;
+   la versión 3, varios aeropuertos de salida y de llegada por búsqueda). La tabla final debe decir
+   "Versión 2 instalada" = 1 y "Versión 3 instalada" = 2.
 5. Apunta estos tres datos:
    - **Project URL** (en **Project Settings → Data API**): algo como `https://abcdxyz.supabase.co`.
    - **Publishable key** (en **Project Settings → API Keys**): empieza por `sb_publishable_`. Es pública y va en la web.

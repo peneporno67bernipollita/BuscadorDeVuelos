@@ -3,7 +3,8 @@
 Vigila precios de vuelos por ti y te avisa por **Telegram** cuando es buen momento para comprar.
 Tú compras en la web oficial de la aerolínea.
 
-- **Aeropuertos exactos**: elijas Orly, no "París"; la vuelta, a los mismos aeropuertos.
+- **Aeropuertos exactos, uno o varios**: Orly, no "París"; y si te vale salir de Sevilla o de Jerez, añades los dos
+  (la web te sugiere los cercanos) y el robot busca desde todos a la vez.
 - **Horarios**: franjas de salida y de llegada para la ida y para la vuelta.
 - **Pasajeros**: hasta 9 (adultos, niños y bebés), con el **precio total** de todos, maletas incluidas.
 - **Descuentos**: familia numerosa y residente, aplicados automáticamente en vuelos nacionales.
@@ -12,7 +13,9 @@ Tú compras en la web oficial de la aerolínea.
   [investigación](docs/INVESTIGACION.md)).
 - **Seguridad**: solo aerolíneas seguras (lista blanca estricta, editable) y solo enlaces a webs oficiales.
 - **Privacidad**: cada búsqueda en una sesión privada nueva, sin cookies.
-- **En directo**: el robot busca sin parar y la web muestra al momento cada cambio de precio, con gráfica y estadísticas.
+- **En directo**: el robot busca sin parar y la web muestra al momento cada revisión (suba, baje o siga igual), con
+  gráfica tipo bolsa, estadísticas y comparación con tu objetivo.
+- **Comprar ya**: un botón (y un enlace en Telegram) que abre Google Flights con esos vuelos exactos ya elegidos.
 
 ## Cómo funciona
 

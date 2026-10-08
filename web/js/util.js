@@ -141,6 +141,33 @@ export function nombreAeropuerto(datos, codigo, conCodigo = true) {
   return conCodigo ? `${nombre} (${codigo})` : nombre;
 }
 
+/** Aeropuertos de salida y de llegada de una búsqueda: el principal y los alternativos (sin repetir). */
+export function aeropuertosDe(b) {
+  const unicos = (lista) => [...new Set(lista.filter(Boolean))];
+  return {
+    origenes: unicos([b.origen, ...(b.origenes_extra || [])]),
+    destinos: unicos([b.destino, ...(b.destinos_extra || [])]),
+  };
+}
+
+/** Aeropuertos a menos de `km` de otro, del más cercano al más lejano (Sevilla → Jerez, 75 km). */
+export function aeropuertosCercanos(datos, codigo, { km = 150, limite = 3, excluir = [] } = {}) {
+  const a = datos?.mapa.get(codigo);
+  if (!a || a.la == null) return [];
+  const rad = Math.PI / 180;
+  const distancia = (b) => {
+    const h = Math.sin(((b.la - a.la) * rad) / 2) ** 2
+      + Math.cos(a.la * rad) * Math.cos(b.la * rad) * Math.sin(((b.lo - a.lo) * rad) / 2) ** 2;
+    return 2 * 6371 * Math.asin(Math.sqrt(h));
+  };
+  return datos.lista
+    .filter((b) => b.c !== codigo && b.la != null && !excluir.includes(b.c))
+    .map((b) => ({ aeropuerto: b, km: Math.round(distancia(b)) }))
+    .filter((x) => x.km <= km)
+    .sort((x, y) => x.km - y.km)
+    .slice(0, limite);
+}
+
 export function buscarAeropuertos(datos, texto, limite = 8) {
   const q = datos.quitarTildes(texto.trim());
   if (q.length < 2) return [];

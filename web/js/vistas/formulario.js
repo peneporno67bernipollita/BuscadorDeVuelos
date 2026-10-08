@@ -1,6 +1,10 @@
 import { api } from "../api.js";
 import { icono } from "../iconos.js";
-import { $, aeropuertos, aviso, bandera, buscarAeropuertos, conCarga, esc, eur, fecha, nombreAeropuerto } from "../util.js";
+import {
+  $, aeropuertos, aeropuertosCercanos, aviso, bandera, buscarAeropuertos, conCarga, esc, eur, fecha, nombreAeropuerto,
+} from "../util.js";
+
+const MAX_EXTRA = 3; // aeropuertos alternativos por lado
 
 const hoyMas = (dias) => {
   const d = new Date();
@@ -88,6 +92,16 @@ function montarAeropuerto(contenedor, datos, codigoInicial, alCambiar) {
   input.addEventListener("blur", () => setTimeout(cerrar, 150));
   mostrarElegido();
   return { poner: (c) => { codigo = c; input.value = ""; mostrarElegido(); } };
+}
+
+/** Aeropuerto principal + alternativos (chips) + sugerencias de aeropuertos cercanos. */
+function bloqueAeropuerto(lado, titulo) {
+  return `
+    <label>${titulo}</label><div id="${lado}"></div>
+    <div class="extras" id="extras-${lado}"></div>
+    <div class="oculto" id="anadir-${lado}" style="margin-top:.5rem"></div>
+    <button type="button" class="fantasma pequeno" data-anadir="${lado}" style="margin-top:.35rem">${icono("mas")}Otro aeropuerto de ${lado === "origen" ? "salida" : "llegada"}</button>
+    <div class="cercanos" id="cercanos-${lado}"></div>`;
 }
 
 function rangoDoble(nombre, titulo, min, max) {
@@ -178,15 +192,16 @@ export async function vistaFormulario(app, id, duplicar = false) {
           </section>
 
           <section class="tarjeta seccion-form">
-            <div class="tarjeta-titulo"><h2><span class="numero">2</span>Aeropuertos exactos</h2></div>
+            <div class="tarjeta-titulo"><h2><span class="numero">2</span>Aeropuertos</h2></div>
             <div class="aeropuertos">
-              <div class="campo"><label>Salida</label><div id="origen"></div></div>
+              <div class="campo">${bloqueAeropuerto("origen", "Salida")}</div>
               <button type="button" class="icono intercambiar" id="intercambiar" title="Intercambiar origen y destino">${icono("intercambiar")}</button>
-              <div class="campo"><label>Llegada</label><div id="destino"></div></div>
+              <div class="campo">${bloqueAeropuerto("destino", "Llegada")}</div>
             </div>
             <div class="nota" id="nota-vuelta">${icono("info")}<span></span></div>
-            <p class="ayuda">Ojo con las ciudades con varios aeropuertos: París tiene CDG, Orly (ORY) y Beauvais (BVA, a 85 km);
-              Londres tiene seis. Solo se aceptan vuelos del aeropuerto exacto; las escalas intermedias dan igual.</p>
+            <p class="ayuda">¿Te vale salir de varios sitios (p. ej. Sevilla o Jerez)? Añade hasta ${MAX_EXTRA} aeropuertos más por lado:
+              el robot busca desde todos a la vez y te enseña el más barato. Solo se aceptan vuelos de los aeropuertos que elijas
+              (ojo: París tiene CDG, Orly y Beauvais, a 85 km); las escalas intermedias dan igual.</p>
           </section>
 
           <section class="tarjeta seccion-form">
@@ -283,14 +298,78 @@ export async function vistaFormulario(app, id, duplicar = false) {
   const num = (idCampo) => Number($(`#${idCampo}`).value ?? $(`#${idCampo}`).textContent);
   let origen = b.origen;
   let destino = b.destino;
+  const extras = { origen: [...(b.origenes_extra || [])], destino: [...(b.destinos_extra || [])] };
+  const principalDe = (lado) => (lado === "origen" ? origen : destino);
+  const todos = (lado) => [principalDe(lado), ...extras[lado]].filter(Boolean);
+  const nombres = (lado) => todos(lado).map((c) => nombreAeropuerto(datos, c)).join(" o ");
 
   form.querySelectorAll("[data-rango]").forEach(activarRango);
-  const campoOrigen = montarAeropuerto($("#origen"), datos, origen, (c) => { origen = c; actualizar(); });
-  const campoDestino = montarAeropuerto($("#destino"), datos, destino, (c) => { destino = c; actualizar(); });
+
+  // Aeropuertos alternativos: chips, campo para añadir y sugerencias de aeropuertos cercanos
+  const pintarExtras = (lado) => {
+    extras[lado] = extras[lado].filter((c) => c !== principalDe(lado));
+    $(`#extras-${lado}`).innerHTML = extras[lado].map((c) => `
+      <span class="chip primario">${icono("ubicacion")}${esc(nombreAeropuerto(datos, c))}
+        <button type="button" class="quitar" data-quitar="${lado}" data-codigo="${c}" aria-label="Quitar ${c}">${icono("cruz")}</button></span>`).join("");
+    const caben = principalDe(lado) && extras[lado].length < MAX_EXTRA;
+    form.querySelector(`[data-anadir="${lado}"]`).classList.toggle("oculto", !caben);
+    const usados = [...todos("origen"), ...todos("destino")];
+    const cerca = caben ? aeropuertosCercanos(datos, principalDe(lado), { excluir: usados }) : [];
+    $(`#cercanos-${lado}`).innerHTML = cerca.length
+      ? `<span class="tenue">Cerca:</span>${cerca.map(({ aeropuerto: a, km }) =>
+        `<button type="button" class="chip" data-cercano="${lado}" data-codigo="${a.c}">${icono("mas")}${esc(a.es || a.m || a.n)} (${a.c}) · ${km} km</button>`).join("")}`
+      : "";
+  };
+  const anadirExtra = (lado, codigo) => {
+    if (!codigo || todos("origen").includes(codigo) || todos("destino").includes(codigo) || extras[lado].length >= MAX_EXTRA) return;
+    extras[lado].push(codigo);
+    pintarExtras(lado);
+    actualizar();
+  };
+  const abrirAnadir = (lado) => {
+    const caja = $(`#anadir-${lado}`);
+    caja.classList.remove("oculto");
+    form.querySelector(`[data-anadir="${lado}"]`).classList.add("oculto");
+    montarAeropuerto(caja, datos, "", (c) => {
+      if (!c) return;
+      caja.classList.add("oculto");
+      caja.innerHTML = "";
+      anadirExtra(lado, c);
+    });
+    caja.querySelector("input").focus();
+  };
+  form.addEventListener("click", (ev) => {
+    const quitar = ev.target.closest("[data-quitar]");
+    const cercano = ev.target.closest("[data-cercano]");
+    const anadir = ev.target.closest("[data-anadir]");
+    if (quitar) {
+      const lado = quitar.dataset.quitar;
+      extras[lado] = extras[lado].filter((c) => c !== quitar.dataset.codigo);
+      pintarExtras(lado);
+      actualizar();
+    } else if (cercano) {
+      anadirExtra(cercano.dataset.cercano, cercano.dataset.codigo);
+    } else if (anadir) {
+      abrirAnadir(anadir.dataset.anadir);
+    }
+  });
+
+  const alCambiarPrincipal = (lado) => (c) => {
+    if (lado === "origen") origen = c;
+    else destino = c;
+    pintarExtras("origen");
+    pintarExtras("destino");
+    actualizar();
+  };
+  const campoOrigen = montarAeropuerto($("#origen"), datos, origen, alCambiarPrincipal("origen"));
+  const campoDestino = montarAeropuerto($("#destino"), datos, destino, alCambiarPrincipal("destino"));
   $("#intercambiar").addEventListener("click", () => {
     [origen, destino] = [destino, origen];
+    [extras.origen, extras.destino] = [extras.destino, extras.origen];
     campoOrigen.poner(origen);
     campoDestino.poner(destino);
+    pintarExtras("origen");
+    pintarExtras("destino");
     actualizar();
   });
 
@@ -316,9 +395,12 @@ export async function vistaFormulario(app, id, duplicar = false) {
     const nota = $("#nota-vuelta");
     nota.classList.toggle("oculto", !(origen && destino));
     if (origen && destino) {
+      const ida = `${todos("origen").map(esc).join(" o ")} → ${todos("destino").map(esc).join(" o ")}`;
+      const vuelta = `${todos("destino").map(esc).join(" o ")} → ${todos("origen").map(esc).join(" o ")}`;
+      const varios = todos("origen").length > 1 || todos("destino").length > 1;
       nota.querySelector("span").innerHTML = idaVuelta
-        ? `Ida <b>${esc(origen)} → ${esc(destino)}</b> · vuelta <b>${esc(destino)} → ${esc(origen)}</b>: siempre a los mismos aeropuertos.`
-        : `Solo ida <b>${esc(origen)} → ${esc(destino)}</b>.`;
+        ? `Ida <b>${ida}</b> · vuelta <b>${vuelta}</b>: ${varios ? "vale cualquiera de tus aeropuertos, también a la vuelta." : "siempre a los mismos aeropuertos."}`
+        : `Solo ida <b>${ida}</b>.`;
     }
     // Resumen en vivo
     const pax = num("adultos") + num("ninos") + num("bebes");
@@ -329,7 +411,7 @@ export async function vistaFormulario(app, id, duplicar = false) {
       ? `Avisar si baja de ${$("#presupuesto").value ? eur($("#presupuesto").value) : "…"}`
       : "Avisar en el mejor momento";
     $("#resumen").innerHTML = `
-      <li>${icono("avion")}<span><b>${origen ? esc(nombreAeropuerto(datos, origen)) : "Elige salida"}</b><br>${destino ? esc(nombreAeropuerto(datos, destino)) : "Elige llegada"}${idaVuelta ? " · ida y vuelta" : " · solo ida"}</span></li>
+      <li>${icono("avion")}<span><b>${origen ? esc(nombres("origen")) : "Elige salida"}</b><br>${destino ? esc(nombres("destino")) : "Elige llegada"}${idaVuelta ? " · ida y vuelta" : " · solo ida"}</span></li>
       <li>${icono("calendario")}<span>${esc(fechas)}</span></li>
       <li>${icono("personas")}<span>${pax} pasajero${pax !== 1 ? "s" : ""} · ${num("maletas_cabina")} cabina · ${num("maletas_20kg")} facturada${num("maletas_20kg") !== 1 ? "s" : ""}</span></li>
       <li>${icono("despegue")}<span>${valorRadio("escalas_max") === "0" ? "Solo directos" : `Hasta ${valorRadio("escalas_max")} escala${valorRadio("escalas_max") === "2" ? "s" : ""} de ${$("#escala_max_horas").value} h`}</span></li>
@@ -337,6 +419,8 @@ export async function vistaFormulario(app, id, duplicar = false) {
   }
   form.addEventListener("input", actualizar);
   form.addEventListener("change", actualizar);
+  pintarExtras("origen");
+  pintarExtras("destino");
   actualizar();
 
   form.addEventListener("submit", async (ev) => {
@@ -377,6 +461,7 @@ export async function vistaFormulario(app, id, duplicar = false) {
     const hoy = hoyMas(0);
     if (!origen || !destino) errores.push("Elige los dos aeropuertos de la lista.");
     if (origen && origen === destino) errores.push("El aeropuerto de salida y el de llegada no pueden ser el mismo.");
+    if (todos("origen").some((c) => todos("destino").includes(c))) errores.push("Un aeropuerto no puede ser a la vez de salida y de llegada.");
     if (modo === "fechas") {
       if (!d.fecha_ida) errores.push("Pon la fecha de ida.");
       else if (d.fecha_ida < hoy) errores.push("La fecha de ida ya ha pasado.");
@@ -396,6 +481,9 @@ export async function vistaFormulario(app, id, duplicar = false) {
     $("#errores").innerHTML = errores.map(esc).join("<br>");
     if (errores.length) return;
 
+    // Solo se envían si se usan (así no hace falta haber actualizado la base de datos si no los usas)
+    if (extras.origen.length || "origenes_extra" in b) d.origenes_extra = extras.origen;
+    if (extras.destino.length || "destinos_extra" in b) d.destinos_extra = extras.destino;
     d.nombre = $("#nombre").value.trim() || `${nombreAeropuerto(datos, origen, false)} → ${nombreAeropuerto(datos, destino, false)}`;
     try {
       const guardada = await conCarga(ev.submitter, editando ? api.actualizarBusqueda(id, d) : api.crearBusqueda(d));

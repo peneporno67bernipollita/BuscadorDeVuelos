@@ -2,23 +2,25 @@ import { api } from "../api.js";
 import { miniGrafica } from "../graficas.js";
 import { icono } from "../iconos.js";
 import {
-  $, aeropuertos, aviso, cadaSegundos, alSalir, contarHasta, cuentaAtras, deltaHtml, destello, esc, eur, fechaHora,
+  $, aeropuertos, aeropuertosDe, aviso, cadaSegundos, alSalir, contarHasta, cuentaAtras, deltaHtml, destello, esc, eur, fechaHora,
   fechasTexto, hace, limpiarPantalla, pasajerosTexto,
 } from "../util.js";
 
 const TIPO_AVISO = {
   presupuesto: "Dentro de presupuesto", buen_momento: "Buen momento", proximo: "Viaje próximo", final: "Último aviso",
-  bajada: "Ha bajado más", chollo: "Chollo", sin_presupuesto: "Nada dentro de presupuesto",
+  bajada: "Ha bajado más", bajada_fuerte: "Bajada fuerte", chollo: "Chollo", sin_presupuesto: "Nada dentro de presupuesto",
 };
 
-function rutaHtml(datos, origen, destino, idaVuelta) {
+function rutaHtml(datos, b) {
   const a = (c) => datos.mapa.get(c);
   const ciudad = (c) => esc(a(c)?.es || a(c)?.m || c);
+  const { origenes, destinos } = aeropuertosDe(b);
+  const alternativos = (lista) => (lista.length > 1 ? `<div class="alternativos">o ${lista.slice(1).map(esc).join(" · ")}</div>` : "");
   return `
-    <div class="ruta" title="${idaVuelta ? "Ida y vuelta" : "Solo ida"}">
-      <div class="aeropuerto"><div class="codigo">${esc(origen)}</div><div class="ciudad">${ciudad(origen)}</div></div>
+    <div class="ruta" title="${b.ida_vuelta ? "Ida y vuelta" : "Solo ida"}">
+      <div class="aeropuerto"><div class="codigo">${esc(origenes[0])}</div><div class="ciudad">${ciudad(origenes[0])}</div>${alternativos(origenes)}</div>
       <div class="trazo">${icono("avion")}</div>
-      <div class="aeropuerto fin"><div class="codigo">${esc(destino)}</div><div class="ciudad">${ciudad(destino)}</div></div>
+      <div class="aeropuerto fin"><div class="codigo">${esc(destinos[0])}</div><div class="ciudad">${ciudad(destinos[0])}</div>${alternativos(destinos)}</div>
     </div>`;
 }
 
@@ -52,7 +54,7 @@ function tarjetaBusqueda(b, datos) {
         </div>
         <button class="icono pequeno fantasma" data-pausar="${b.id}" title="${b.activa ? "Pausar" : "Reanudar"}">${icono(b.activa ? "pausa" : "play")}</button>
       </div>
-      ${rutaHtml(datos, b.origen, b.destino, b.ida_vuelta)}
+      ${rutaHtml(datos, b)}
       <div class="fila pequeno suave" style="gap:.9rem">
         <span class="fila" style="gap:.3rem">${icono("calendario")}${esc(fechasTexto(b))}</span>
         <span class="fila" style="gap:.3rem">${icono("personas")}${esc(pasajerosTexto(b))}</span>

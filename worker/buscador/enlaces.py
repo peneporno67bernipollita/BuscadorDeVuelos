@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import logging
+from types import SimpleNamespace
 from urllib.parse import quote, urlencode
 
 from .modelos import Opcion, Trayecto
+
+log = logging.getLogger(__name__)
 
 GRUPO_RYANAIR = {"FR", "RK", "AL", "LW", "RR"}
 
@@ -35,6 +39,41 @@ def google_flights(busqueda: dict, opcion: Opcion) -> str:
     else:
         q = f"One way flights to {d} from {o} on {opcion.ida.fecha}"
     return f"https://www.google.com/travel/flights?q={quote(q)}&curr=EUR&hl=es&gl=ES"
+
+
+def _segmento_fijado(trayecto: Trayecto) -> bytes:
+    from fli.search._proto import LegSpec, encode_tfs_segment
+
+    legs = [LegSpec(t.origen, t.salida.date().isoformat(), t.destino, t.aerolinea, str(t.numero)) for t in trayecto.tramos]
+    return encode_tfs_segment([trayecto.origen], [trayecto.destino], trayecto.fecha.isoformat(), legs=legs)
+
+
+def comprar_ya(busqueda: dict, opcion: Opcion) -> list[dict]:
+    """Enlaces a la página de reserva de Google Flights con esos vuelos exactos ya elegidos
+    (allí sale "Reservar con <aerolínea>"). Si ida y vuelta son billetes separados, uno para cada uno."""
+    try:
+        from fli.search._proto import encode_tfs_payload, passenger_codes
+
+        pasajeros = passenger_codes(SimpleNamespace(
+            adults=busqueda.get("adultos") or 1, children=busqueda.get("ninos") or 0,
+            infants_on_lap=busqueda.get("bebes") or 0, infants_in_seat=0,
+        ))
+
+        def url(segmentos: bytes, solo_ida: bool) -> str:
+            tfs = encode_tfs_payload(segmentos, is_one_way=solo_ida, passengers=pasajeros)
+            return f"https://www.google.com/travel/flights/booking?tfs={tfs}&hl=es&gl=ES&curr=EUR"
+
+        if opcion.vuelta is None:
+            return [{"texto": "Comprar ya", "url": url(_segmento_fijado(opcion.ida), True)}]
+        if opcion.billetes_separados:
+            return [
+                {"texto": "Comprar la ida", "url": url(_segmento_fijado(opcion.ida), True)},
+                {"texto": "Comprar la vuelta", "url": url(_segmento_fijado(opcion.vuelta), True)},
+            ]
+        return [{"texto": "Comprar ya", "url": url(_segmento_fijado(opcion.ida) + _segmento_fijado(opcion.vuelta), False)}]
+    except Exception as e:  # si la librería cambia, quedan los enlaces de siempre
+        log.warning("No se pudo crear el enlace de compra de Google Flights: %s", type(e).__name__)
+        return []
 
 
 def compra(busqueda: dict, opcion: Opcion, aerolineas: dict[str, dict]) -> list[dict]:

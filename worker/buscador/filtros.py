@@ -2,9 +2,24 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
+
 from .modelos import Opcion, Trayecto
 
 MINUTOS_DIA = 24 * 60
+MAX_AEROPUERTOS = 4  # por lado (el principal y hasta 3 alternativos)
+
+
+def aeropuertos_busqueda(busqueda: dict) -> tuple[list[str], list[str]]:
+    """Aeropuertos de salida y de llegada: el principal y los alternativos que añadas en la web
+    (p. ej. Sevilla o Jerez). Cualquiera de los de salida vale para volver."""
+    origenes = [busqueda["origen"], *(busqueda.get("origenes_extra") or [])]
+    destinos = [busqueda["destino"], *(busqueda.get("destinos_extra") or [])]
+    return list(dict.fromkeys(origenes))[:MAX_AEROPUERTOS], list(dict.fromkeys(destinos))[:MAX_AEROPUERTOS]
+
+
+def _lista(codigos: str | Collection[str]) -> list[str]:
+    return [codigos] if isinstance(codigos, str) else list(codigos)
 
 
 def _minutos_desde_medianoche(trayecto: Trayecto, momento) -> int:
@@ -33,17 +48,19 @@ def franja(busqueda: dict, sentido: str) -> tuple[int, int, int, int]:
 
 def validar_trayecto(
     trayecto: Trayecto,
-    origen: str,
-    destino: str,
+    origen: str | Collection[str],
+    destino: str | Collection[str],
     franja_horas: tuple[int, int, int, int],
     escalas_max: int,
     espera_max_min: int,
 ) -> str | None:
-    """Devuelve el motivo de rechazo, o None si el trayecto es válido."""
-    if trayecto.origen != origen:
-        return f"sale de {trayecto.origen} y no de {origen}"
-    if trayecto.destino != destino:
-        return f"llega a {trayecto.destino} y no a {destino}"
+    """Devuelve el motivo de rechazo, o None si el trayecto es válido.
+    origen/destino: un aeropuerto o varios (vale cualquiera de ellos)."""
+    origenes, destinos = _lista(origen), _lista(destino)
+    if trayecto.origen not in origenes:
+        return f"sale de {trayecto.origen} y no de {' / '.join(origenes)}"
+    if trayecto.destino not in destinos:
+        return f"llega a {trayecto.destino} y no a {' / '.join(destinos)}"
     for a, b in zip(trayecto.tramos, trayecto.tramos[1:]):
         if a.destino != b.origen:
             return f"cambio de aeropuerto en la escala ({a.destino} → {b.origen})"
@@ -88,8 +105,9 @@ class Validador:
 
     def sentido(self, trayecto: Trayecto, sentido: str) -> str | None:
         """Valida solo la ida o solo la vuelta (para combinar billetes de solo ida)."""
-        # La vuelta sale exactamente del aeropuerto de llegada y vuelve al de salida.
-        o, d = (self.b["origen"], self.b["destino"]) if sentido == "ida" else (self.b["destino"], self.b["origen"])
+        # La vuelta sale de uno de tus aeropuertos de llegada y vuelve a uno de los de salida.
+        origenes, destinos = aeropuertos_busqueda(self.b)
+        o, d = (origenes, destinos) if sentido == "ida" else (destinos, origenes)
         motivo = validar_trayecto(trayecto, o, d, franja(self.b, sentido), self.escalas_max, self.espera_max)
         if motivo:
             return ("Ida: " if sentido == "ida" else "Vuelta: ") + motivo

@@ -41,6 +41,8 @@ def main() -> None:
     p = argparse.ArgumentParser(description="Prueba una búsqueda de vuelos")
     p.add_argument("origen")
     p.add_argument("destino")
+    p.add_argument("--tambien-desde", default="", help="otros aeropuertos de salida, p. ej. XRY,AGP")
+    p.add_argument("--tambien-a", default="", help="otros aeropuertos de llegada, p. ej. CDG")
     p.add_argument("--ida", help="AAAA-MM-DD (modo fechas)")
     p.add_argument("--vuelta", help="AAAA-MM-DD (si es ida y vuelta)")
     p.add_argument("--flex", type=int, default=0, help="± días de margen (0-3)")
@@ -71,6 +73,8 @@ def main() -> None:
         "id": str(uuid.uuid4()), "usuario": "local", "nombre": f"{a.origen}-{a.destino} (prueba)",
         "modo": "chollo" if a.chollo else "fechas", "ida_vuelta": ida_vuelta,
         "origen": a.origen.upper(), "destino": a.destino.upper(),
+        "origenes_extra": [c.strip().upper() for c in a.tambien_desde.split(",") if c.strip()],
+        "destinos_extra": [c.strip().upper() for c in a.tambien_a.split(",") if c.strip()],
         "fecha_ida": a.ida, "fecha_vuelta": a.vuelta, "flex_dias": a.flex,
         "adultos": a.adultos, "ninos": a.ninos, "bebes": a.bebes,
         "maletas_cabina": a.cabina, "maletas_20kg": a.facturada,

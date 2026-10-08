@@ -2,14 +2,14 @@ import { api } from "../api.js";
 import { graficaPrecios } from "../graficas.js";
 import { icono } from "../iconos.js";
 import {
-  $, aeropuertos, alSalir, aviso, cadaSegundos, confirmar, contarHasta, cuentaAtras, deltaHtml, destello, esc, eur,
+  $, aeropuertos, aeropuertosDe, alSalir, aviso, cadaSegundos, confirmar, contarHasta, cuentaAtras, deltaHtml, destello, esc, eur,
   fecha, fechaHora, fechasTexto, hace, horaLocal, limpiarPantalla, maletasTexto, pasajerosTexto,
 } from "../util.js";
 
 const NOMBRE_FUENTE = { google_flights: "Google Flights", ryanair: "Ryanair", skyscanner: "Skyscanner" };
 const TIPO_AVISO = {
   presupuesto: "Dentro de presupuesto", buen_momento: "Buen momento para comprar", proximo: "Viaje próximo",
-  final: "Último aviso", bajada: "Ha bajado todavía más", chollo: "Chollo", sin_presupuesto: "Nada dentro de presupuesto",
+  final: "Último aviso", bajada: "Ha bajado todavía más", bajada_fuerte: "Bajada fuerte de precio", chollo: "Chollo", sin_presupuesto: "Nada dentro de presupuesto",
 };
 const PERIODOS = { "24h": 1, "7d": 7, todo: null };
 
@@ -44,10 +44,22 @@ function lineaTrayecto(etiqueta, tr, aerolineas) {
     </div>`;
 }
 
+/** Botones de compra: la página de reserva de Google Flights con esos vuelos ya elegidos. */
+function botonesComprar(p, { grande = false } = {}) {
+  const d = p?.detalle || {};
+  const clase = `boton primario ${grande ? "" : "pequeno"}`;
+  if (d.comprar?.length) {
+    return d.comprar.map((e) =>
+      `<a class="${clase}" href="${esc(e.url)}" target="_blank" rel="noopener">${icono("etiqueta")}${esc(e.texto)}</a>`).join("");
+  }
+  return d.google_flights
+    ? `<a class="${clase}" href="${esc(d.google_flights)}" target="_blank" rel="noopener">${icono("etiqueta")}Comprar en Google Flights</a>` : "";
+}
+
 function tarjetaVuelo(p, aerolineas, esMejor) {
   const d = p.detalle || {};
   const enlaces = (d.enlaces || []).map((e) =>
-    `<a class="boton pequeno primario" href="${esc(e.url)}" target="_blank" rel="noopener">${icono("externo")}${esc(e.aerolinea)}</a>`).join("");
+    `<a class="boton pequeno" href="${esc(e.url)}" target="_blank" rel="noopener">${icono("externo")}${esc(e.aerolinea)}</a>`).join("");
   return `
     <div class="vuelo ${esMejor ? "mejor" : ""}">
       <div class="vuelo-cabecera">
@@ -65,8 +77,8 @@ function tarjetaVuelo(p, aerolineas, esMejor) {
           <span>Billetes ${eur(p.precio_billetes)}${Number(p.precio_maletas) ? ` · maletas ${eur(p.precio_maletas)} <span class="chip alerta" title="${esc((d.desglose_maletas || []).join("\n"))}">máx. estimado</span>` : ""}${Number(p.descuento) ? ` · descuento −${eur(p.descuento)}` : ""}</span>
           ${(d.notas || []).map((n) => `<span class="tenue">${esc(n)}</span>`).join("")}
         </div>
-        <div class="acciones">${enlaces}
-          ${d.google_flights ? `<a class="boton pequeno" href="${esc(d.google_flights)}" target="_blank" rel="noopener">${icono("lupa")}Google Flights</a>` : ""}</div>
+        <div class="acciones">${botonesComprar(p)}${enlaces}
+          ${d.google_flights && d.comprar?.length ? `<a class="boton pequeno fantasma" href="${esc(d.google_flights)}" target="_blank" rel="noopener">${icono("lupa")}Ver otras opciones</a>` : ""}</div>
       </div>
     </div>`;
 }
@@ -179,6 +191,9 @@ export async function vistaDetalle(app, id) {
   const aerolineas = new Map(listaAerolineas.map((a) => [a.codigo, a]));
   const info = b.info || {};
   const ciudad = (c) => esc(datos.mapa.get(c)?.es || datos.mapa.get(c)?.m || c);
+  const { origenes, destinos } = aeropuertosDe(b);
+  const alternativos = (lista) => (lista.length > 1
+    ? `<div class="alternativos">o ${lista.slice(1).map((c) => `${esc(c)} · ${ciudad(c)}`).join(", ")}</div>` : "");
   const presupuesto = b.modo_precio === "presupuesto" ? b.presupuesto : null;
   const notaRechazos = (r) => {
     const lista = Object.entries(r || {});
@@ -204,9 +219,9 @@ export async function vistaDetalle(app, id) {
           </div>
         </div>
         <div class="ruta grande" style="margin:1.4rem 0 1.2rem">
-          <div class="aeropuerto"><div class="codigo">${esc(b.origen)}</div><div class="ciudad">${ciudad(b.origen)}</div></div>
+          <div class="aeropuerto"><div class="codigo">${esc(b.origen)}</div><div class="ciudad">${ciudad(b.origen)}</div>${alternativos(origenes)}</div>
           <div class="trazo">${icono("avion")}</div>
-          <div class="aeropuerto fin"><div class="codigo">${esc(b.destino)}</div><div class="ciudad">${ciudad(b.destino)}</div></div>
+          <div class="aeropuerto fin"><div class="codigo">${esc(b.destino)}</div><div class="ciudad">${ciudad(b.destino)}</div>${alternativos(destinos)}</div>
         </div>
         <div class="fila" style="gap:.45rem">
           <span class="chip">${icono("calendario")}${esc(fechasTexto(b))}</span>
@@ -234,7 +249,10 @@ export async function vistaDetalle(app, id) {
             <span id="delta-actual">${info.variacion != null ? deltaHtml(info.variacion) : ""}</span>
           </div>
         </div>
-        <div class="veredicto" id="veredicto"></div>
+        <div class="fila-compra">
+          <div class="veredicto" id="veredicto"></div>
+          <div class="acciones" id="comprar-ya">${opciones.length && !opcionesAntiguas ? botonesComprar(opciones[0], { grande: true }) : ""}</div>
+        </div>
         <div class="selector" id="selector" style="margin-bottom:.8rem">
           ${Object.keys(PERIODOS).map((p) => `<button type="button" data-periodo="${p}">${p === "24h" ? "24 h" : p === "7d" ? "7 días" : "Todo"}</button>`).join("")}
         </div>
@@ -395,6 +413,7 @@ export async function vistaDetalle(app, id) {
     const nuevas = await api.ultimasOpciones(id);
     if (nuevas.length) {
       $("#opciones").innerHTML = nuevas.map((p, i) => tarjetaVuelo(p, aerolineas, i === 0)).join("");
+      $("#comprar-ya").innerHTML = botonesComprar(nuevas[0], { grande: true });
       $("#opciones-fecha").textContent = fechaHora(nuevas[0].revisado);
     }
   }, `id=eq.${id}`));

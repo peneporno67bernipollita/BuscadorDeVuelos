@@ -34,6 +34,9 @@ create table if not exists public.busquedas (
   ida_vuelta boolean not null default true,
   origen text not null check (origen ~ '^[A-Z]{3}$'),
   destino text not null check (destino ~ '^[A-Z]{3}$'),
+  -- Aeropuertos alternativos (p. ej. salir de Sevilla o de Jerez): vale cualquiera de ellos
+  origenes_extra text[] not null default '{}',
+  destinos_extra text[] not null default '{}',
   -- modo "fechas": fechas concretas (con margen opcional de ± días)
   fecha_ida date,
   fecha_vuelta date,
@@ -88,7 +91,10 @@ create table if not exists public.busquedas (
         and (not ida_vuelta or (noches_min is not null and noches_max >= noches_min)))
   ),
   constraint presupuesto_si_modo check (modo_precio <> 'presupuesto' or presupuesto is not null),
-  constraint aeropuertos_distintos check (origen <> destino)
+  constraint aeropuertos_distintos check (origen <> destino),
+  constraint busquedas_extras_max check (
+    cardinality(origenes_extra) <= 3 and cardinality(destinos_extra) <= 3
+    and array_to_string(origenes_extra || destinos_extra, ',') ~ '^([A-Z]{3}(,|$))*$')
 );
 create index if not exists busquedas_revision_idx on public.busquedas (activa, proxima_revision);
 
@@ -232,14 +238,14 @@ returns trigger language plpgsql as $$
 begin
   if auth.uid() is not null then
     new.proxima_revision := now();
-    if (new.modo, new.ida_vuelta, new.origen, new.destino, new.fecha_ida, new.fecha_vuelta, new.flex_dias,
+    if (new.modo, new.ida_vuelta, new.origen, new.destino, new.origenes_extra, new.destinos_extra, new.fecha_ida, new.fecha_vuelta, new.flex_dias,
         new.chollo_desde, new.chollo_hasta, new.noches_min, new.noches_max,
         new.ida_salida_min, new.ida_salida_max, new.ida_llegada_min, new.ida_llegada_max,
         new.vuelta_salida_min, new.vuelta_salida_max, new.vuelta_llegada_min, new.vuelta_llegada_max,
         new.adultos, new.ninos, new.bebes, new.maletas_cabina, new.maletas_20kg, new.aplicar_descuentos,
         new.escalas_max, new.escala_max_horas)
        is distinct from
-       (old.modo, old.ida_vuelta, old.origen, old.destino, old.fecha_ida, old.fecha_vuelta, old.flex_dias,
+       (old.modo, old.ida_vuelta, old.origen, old.destino, old.origenes_extra, old.destinos_extra, old.fecha_ida, old.fecha_vuelta, old.flex_dias,
         old.chollo_desde, old.chollo_hasta, old.noches_min, old.noches_max,
         old.ida_salida_min, old.ida_salida_max, old.ida_llegada_min, old.ida_llegada_max,
         old.vuelta_salida_min, old.vuelta_salida_max, old.vuelta_llegada_min, old.vuelta_llegada_max,
@@ -356,6 +362,21 @@ begin
         execute format('alter publication supabase_realtime add table public.%I', tabla);
       end if;
     end loop;
+  end if;
+end;
+$$;
+
+-- =====================================================================
+-- Actualización v3: varios aeropuertos de salida y de llegada por búsqueda
+-- =====================================================================
+alter table public.busquedas add column if not exists origenes_extra text[] not null default '{}';
+alter table public.busquedas add column if not exists destinos_extra text[] not null default '{}';
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'busquedas_extras_max') then
+    alter table public.busquedas add constraint busquedas_extras_max check (
+      cardinality(origenes_extra) <= 3 and cardinality(destinos_extra) <= 3
+    and array_to_string(origenes_extra || destinos_extra, ',') ~ '^([A-Z]{3}(,|$))*$');
   end if;
 end;
 $$;
