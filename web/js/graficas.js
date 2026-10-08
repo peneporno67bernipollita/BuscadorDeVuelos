@@ -23,9 +23,13 @@ export function graficaPrecios(canvas, puntos, { presupuesto = null } = {}) {
   if (!window.Chart) return null;
   const primario = aRgb(css("--primario"));
   const ok = css("--ok");
+  const mal = css("--mal");
   const suave = css("--suave");
   const borde = css("--borde");
   const datos = puntos.map((p) => ({ x: new Date(p.revisado).getTime(), y: Number(p.precio_total) }));
+  // Como en un gráfico de bolsa: cada tramo en verde si baja, en rojo si sube y neutro si se mantiene
+  const colorTramo = (c) => (c.p1.parsed.y < c.p0.parsed.y - 0.005 ? ok : c.p1.parsed.y > c.p0.parsed.y + 0.005 ? mal : primario);
+  const muchos = () => datos.length > 150;
   // Solo se resalta la primera vez que se vio el mínimo (si se repite, no se llena de puntos verdes)
   const indiceMinimo = () => datos.reduce((mejor, d, i) => (d.y < datos[mejor].y ? i : mejor), 0);
 
@@ -38,10 +42,12 @@ export function graficaPrecios(canvas, puntos, { presupuesto = null } = {}) {
           data: datos,
           borderColor: primario,
           borderWidth: 2.5,
-          tension: 0.32,
+          tension: 0.15,
+          segment: { borderColor: colorTramo },
           fill: true,
           backgroundColor: (c) => (c.chart.chartArea ? degradado(c.chart.ctx, c.chart.chartArea, primario) : "transparent"),
-          pointRadius: (c) => (datos.length && c.dataIndex === indiceMinimo() ? 5 : c.dataIndex === datos.length - 1 ? 4 : 0),
+          // Un punto por cada revisión (aunque el precio no cambie); el mínimo y el último, más grandes
+          pointRadius: (c) => (datos.length && c.dataIndex === indiceMinimo() ? 5.5 : c.dataIndex === datos.length - 1 ? 5 : muchos() ? 0 : 2.2),
           pointBackgroundColor: (c) => (datos.length && c.dataIndex === indiceMinimo() ? ok : primario),
           pointBorderColor: css("--superficie-solida"),
           pointBorderWidth: 2,
@@ -49,7 +55,7 @@ export function graficaPrecios(canvas, puntos, { presupuesto = null } = {}) {
         },
         ...(presupuesto
           ? [{
-              label: "Tu presupuesto",
+              label: "Tu objetivo",
               data: datos.length ? [{ x: datos[0].x, y: Number(presupuesto) }, { x: datos.at(-1).x, y: Number(presupuesto) }] : [],
               borderColor: ok, borderWidth: 1.5, borderDash: [6, 6], pointRadius: 0, fill: false,
             }]
@@ -65,7 +71,17 @@ export function graficaPrecios(canvas, puntos, { presupuesto = null } = {}) {
         tooltip: {
           backgroundColor: css("--superficie-solida"), titleColor: css("--texto"), bodyColor: css("--texto"),
           borderColor: css("--borde-fuerte"), borderWidth: 1, padding: 12, cornerRadius: 12, displayColors: false,
-          callbacks: { title: (items) => fechaHora(items[0].parsed.x), label: (c) => `${c.dataset.label}: ${eur(c.parsed.y)}` },
+          callbacks: {
+            title: (items) => `Revisión del ${fechaHora(items[0].parsed.x)}`,
+            label: (c) => `${c.dataset.label}: ${eur(c.parsed.y)}`,
+            afterLabel: (c) => {
+              if (c.datasetIndex !== 0) return "";
+              const antes = datos[c.dataIndex - 1];
+              if (!antes) return "Primer precio encontrado";
+              const dif = c.parsed.y - antes.y;
+              return Math.abs(dif) < 0.01 ? "Sin cambios respecto a la anterior" : `${dif < 0 ? "▼ Ha bajado" : "▲ Ha subido"} ${eur(Math.abs(dif))}`;
+            },
+          },
         },
       },
       scales: {

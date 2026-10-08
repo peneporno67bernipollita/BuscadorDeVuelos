@@ -423,7 +423,15 @@ button:not(.primario).cargando::after { border-color: var(--borde-fuerte); borde
 .cambios .icono-cambio svg { width: 17px; height: 17px; }
 .cambios .baja .icono-cambio { background: var(--ok-suave); color: var(--ok); }
 .cambios .sube .icono-cambio { background: var(--mal-suave); color: var(--mal); }
+.cambios .igual .icono-cambio { background: var(--superficie-3); color: var(--suave); }
+.cambios .primero .icono-cambio { background: var(--primario-suave); color: var(--primario); }
 .cambios li.nuevo { animation: entrar .6s var(--curva) both, destello-verde 2s ease-out; }
+.veredicto { display: flex; flex-wrap: wrap; gap: .45rem; align-items: center; margin: -.2rem 0 1rem; }
+.veredicto:empty { display: none; }
+.veredicto .medidor { flex: 1 1 140px; max-width: 240px; }
+.buscando { display: inline-flex; align-items: center; gap: .6rem; font-weight: 750; font-size: 1.05rem; color: var(--suave); }
+.buscando svg { width: 20px; height: 20px; color: var(--alerta); }
+.anillo-mini { width: 20px; height: 20px; border-radius: 50%; border: 2.5px solid var(--primario-suave); border-top-color: var(--primario); animation: girar .8s linear infinite; flex: none; }
 
 /* Vuelo como tarjeta de embarque */
 .vuelo { border-radius: var(--radio-medio); border: 1px solid var(--borde); background: var(--superficie-2); overflow: hidden; transition: border-color .3s, transform .3s var(--curva); }

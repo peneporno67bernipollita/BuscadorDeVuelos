@@ -125,3 +125,23 @@ def test_ronda_sin_nada_pendiente_no_hace_nada():
                                           "proxima_revision": futuro}]})
     assert run.ronda(db, None, None, forzar=False, limite_s=60) is None
     assert "ejecuciones" not in db.tablas  # no se apunta una ronda vacía
+
+
+def test_busqueda_nueva_no_espera_al_ritmo_normal_de_la_web():
+    ahora = datetime(2026, 10, 8, 12, 0, tzinfo=timezone.utc)
+    hace = lambda minutos: (ahora - timedelta(minutes=minutos)).isoformat()  # noqa: E731
+    config = {
+        "google_flights": {"activa": True, "intervalo_min": 5, "ultima_ronda": hace(3), "bloqueada_hasta": None},
+        "ryanair": {"activa": True, "intervalo_min": 30, "ultima_ronda": hace(1), "bloqueada_hasta": None},
+        "skyscanner": {"activa": True, "intervalo_min": 740, "ultima_ronda": hace(10),
+                       "bloqueada_hasta": (ahora + timedelta(hours=1)).isoformat()},
+    }
+    vieja = {"ultima_revision": hace(40), "historial_desde": None}
+    nueva = {"ultima_revision": None, "historial_desde": None}
+    editada = {"ultima_revision": hace(40), "historial_desde": hace(1)}
+    # Solo búsquedas ya revisadas: cada web va a su ritmo (Google se miró hace 3 min y va cada 5)
+    assert run.fuentes_listas(config, [vieja], ahora, forzar=False) == []
+    # Una nueva o recién editada: Google ya vale (más de 2 min); Ryanair (1 min) y la bloqueada, no
+    assert run.fuentes_listas(config, [vieja, nueva], ahora, forzar=False) == ["google_flights"]
+    assert run.fuentes_listas(config, [editada], ahora, forzar=False) == ["google_flights"]
+    assert not run.es_nueva(vieja) and run.es_nueva(nueva) and run.es_nueva(editada)

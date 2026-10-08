@@ -134,14 +134,18 @@ export function crearDemo() {
   setInterval(() => {
     const b = d.busquedas.filter((x) => x.activa)[turno++ % d.busquedas.length];
     if (!b) return;
-    const anterior = Number(b.precio_actual);
+    const anterior = b.precio_actual != null ? Number(b.precio_actual) : null;
     const r = Math.random();
-    const nuevo = Math.round((r < 0.45 ? anterior : anterior + (Math.random() - 0.58) * anterior * 0.06) * 100) / 100;
+    const nuevo = anterior === null
+      ? Math.round((120 + Math.random() * 260) * 100) / 100
+      : Math.round((r < 0.45 ? anterior : anterior + (Math.random() - 0.58) * anterior * 0.06) * 100) / 100;
     const punto = { busqueda: b.id, revisado: new Date().toISOString(), precio_total: nuevo, fuente: "google_flights", es_mejor: true };
     d.historial.push(punto);
     Object.assign(b, {
-      precio_actual: nuevo, mejor_precio: Math.min(Number(b.mejor_precio), nuevo), ultima_revision: punto.revisado,
-      proxima_revision: new Date(Date.now() + 20 * MIN).toISOString(), info: { ...b.info, variacion: nuevo - anterior },
+      precio_actual: nuevo, mejor_precio: b.mejor_precio != null ? Math.min(Number(b.mejor_precio), nuevo) : nuevo,
+      ultima_revision: punto.revisado, proxima_revision: new Date(Date.now() + 20 * MIN).toISOString(),
+      info: { ...b.info, variacion: anterior === null ? null : nuevo - anterior },
+      estado: `Revisada: la mejor opción cuesta ${nuevo.toFixed(2).replace(".", ",")} €`,
     });
     emitir("precios", "INSERT", punto);
     emitir("busquedas", "UPDATE", b);

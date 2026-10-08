@@ -72,7 +72,7 @@ function tarjetaVuelo(p, aerolineas, esMejor) {
 }
 
 // ---------------------------------------------------------------------------
-// Estadísticas y cambios de precio
+// Estadísticas, veredicto e historial de precios
 // ---------------------------------------------------------------------------
 function cambiosDePrecio(puntos) {
   const cambios = [];
@@ -84,18 +84,33 @@ function cambiosDePrecio(puntos) {
   return cambios.reverse();
 }
 
-function filaCambio(c, nuevo = false) {
+function filaCambio(c) {
   const baja = c.ahora < c.antes;
-  return `<li class="${baja ? "baja" : "sube"} ${nuevo ? "nuevo" : ""}">
+  return `<li class="${baja ? "baja" : "sube"}">
     <span class="icono-cambio">${icono(baja ? "baja" : "sube")}</span>
     <div><b class="num">${eur(c.antes)} → ${eur(c.ahora)}</b><div class="pequeno tenue">${fechaHora(c.en)}</div></div>
     ${deltaHtml(c.ahora - c.antes, { conIcono: false })}
   </li>`;
 }
 
+/** Una fila por revisión: el precio de ese momento y si subió, bajó o siguió igual. */
+function filaRevision(p, anterior) {
+  const precio = Number(p.precio_total);
+  const dif = anterior ? precio - Number(anterior.precio_total) : null;
+  const clase = dif === null ? "primero" : Math.abs(dif) < 0.01 ? "igual" : dif < 0 ? "baja" : "sube";
+  const icon = { primero: "chispas", igual: "igual", baja: "baja", sube: "sube" }[clase];
+  const etiqueta = dif === null ? '<span class="chip primario">Primer precio</span>'
+    : clase === "igual" ? '<span class="delta igual">sin cambios</span>' : deltaHtml(dif, { conIcono: false });
+  return `<li class="${clase}">
+    <span class="icono-cambio">${icono(icon)}</span>
+    <div><b class="num">${eur(precio)}</b><div class="pequeno tenue">${fechaHora(p.revisado)}</div></div>
+    ${etiqueta}
+  </li>`;
+}
+
 function pintarEstadisticas(cont, puntos) {
   if (!puntos.length) {
-    cont.innerHTML = '<p class="suave">Las estadísticas aparecerán tras la primera revisión.</p>';
+    cont.innerHTML = '<p class="suave" style="grid-column:1/-1;margin:0">Las estadísticas aparecerán con el primer precio.</p>';
     return;
   }
   const valores = puntos.map((p) => Number(p.precio_total));
@@ -109,18 +124,49 @@ function pintarEstadisticas(cont, puntos) {
     <div class="estadistica"><div class="etiqueta">Mínimo</div><div class="valor" style="color:var(--ok)">${eur(min)}</div></div>
     <div class="estadistica"><div class="etiqueta">Máximo</div><div class="valor" style="color:var(--mal)">${eur(max)}</div></div>
     <div class="estadistica"><div class="etiqueta">Media</div><div class="valor">${eur(media)}</div></div>
-    <div class="estadistica"><div class="etiqueta">Desde el inicio</div><div class="valor">${deltaHtml(total) || "—"}</div></div>
+    <div class="estadistica"><div class="etiqueta">Desde el inicio</div><div class="valor">${valores.length > 1 ? deltaHtml(total) : "—"}</div></div>
     <div class="estadistica"><div class="etiqueta">Revisiones</div><div class="valor">${valores.length}</div></div>`;
+}
+
+/** ¿Está cerca de tu objetivo? ¿Es buen precio comparado con lo visto? Para decidir si comprar ya. */
+function veredictoHtml(actual, puntos, presupuesto) {
+  if (actual === null || actual === undefined) return "";
+  const partes = [];
+  if (presupuesto) {
+    const objetivo = Number(presupuesto);
+    const dif = actual - objetivo;
+    if (dif <= 0.005) {
+      partes.push(`<span class="chip ok">${icono("check")}Dentro de tu objetivo de ${eur(objetivo, true)}${dif < -0.5 ? ` · ${eur(-dif)} por debajo` : ""}</span>`);
+    } else {
+      partes.push(`<span class="chip alerta">${icono("euro")}A ${eur(dif)} de tu objetivo de ${eur(objetivo, true)} (+${Math.round((dif / objetivo) * 100)} %)</span>`);
+      partes.push(`<div class="medidor" title="Lo cerca que está de tu objetivo"><span style="width:${Math.max(4, Math.min(100, Math.round((objetivo / actual) * 100)))}%"></span></div>`);
+    }
+  }
+  const valores = puntos.map((p) => Number(p.precio_total));
+  if (valores.length >= 3) {
+    const min = Math.min(...valores);
+    const media = valores.reduce((a, b) => a + b, 0) / valores.length;
+    const pct = Math.round((Math.abs(actual - media) / media) * 100);
+    if (actual <= min + 0.005) partes.push(`<span class="chip ok">${icono("llama")}El precio más bajo visto hasta ahora</span>`);
+    else if (pct === 0) partes.push(`<span class="chip">${icono("igual")}Justo en la media de lo visto</span>`);
+    else if (actual < media) partes.push(`<span class="chip ok">${icono("baja")}${pct} % por debajo de la media</span>`);
+    else partes.push(`<span class="chip mal">${icono("sube")}${pct} % por encima de la media</span>`);
+    if (actual > min + 0.005) partes.push(`<span class="chip">${icono("etiqueta")}Mínimo visto: ${eur(min)}</span>`);
+  } else {
+    partes.push(`<span class="chip">${icono("info")}Tras unas cuantas revisiones te diré si es buen precio</span>`);
+  }
+  return partes.join("");
 }
 
 // ---------------------------------------------------------------------------
 // Pantalla
 // ---------------------------------------------------------------------------
 export async function vistaDetalle(app, id) {
-  const [b, historialTodo, opcionesTodas, avisos, listaAerolineas, datos] = await Promise.all([
+  const [busqueda, historialTodo, opcionesTodas, avisos, listaAerolineas, datos] = await Promise.all([
     api.busqueda(id), api.historial(id), api.ultimasOpciones(id), api.avisos(id), api.aerolineas(), aeropuertos(),
   ]);
-  if (!b) throw new Error("Esa búsqueda no existe.");
+  if (!busqueda) throw new Error("Esa búsqueda no existe.");
+  let b = busqueda;
   const recargar = () => {
     limpiarPantalla();
     return vistaDetalle(app, id);
@@ -132,9 +178,15 @@ export async function vistaDetalle(app, id) {
     && new Date(b.ultima_revision) - new Date(opciones[0].revisado) > 10 * 60000;
   const aerolineas = new Map(listaAerolineas.map((a) => [a.codigo, a]));
   const info = b.info || {};
-  const rechazos = Object.entries(info.rechazos || {});
   const ciudad = (c) => esc(datos.mapa.get(c)?.es || datos.mapa.get(c)?.m || c);
   const presupuesto = b.modo_precio === "presupuesto" ? b.presupuesto : null;
+  const notaRechazos = (r) => {
+    const lista = Object.entries(r || {});
+    return lista.length ? `${icono("aviso")}<span><b>Vuelos descartados por tus filtros:</b> ${lista.map(([m, n]) => `${esc(m)} (${n})`).join(" · ")}</span>` : "";
+  };
+  const placeholderGrafica = `<div class="vacio" style="padding:2rem 1rem"><div class="ilustracion">${icono("grafica")}</div>
+    <p>El robot está buscando tu vuelo con tus filtros. El primer precio aparecerá aquí solo, en unos minutos,
+      y cada revisión añadirá un punto a la gráfica, suba, baje o se mantenga.</p></div>`;
   let periodo = historial.length > 72 ? "7d" : "todo";
 
   app.innerHTML = `
@@ -161,7 +213,7 @@ export async function vistaDetalle(app, id) {
           <span class="chip">${icono("personas")}${esc(pasajerosTexto(b))}</span>
           <span class="chip">${icono("maleta")}${esc(maletasTexto(b))}</span>
           <span class="chip">${icono("despegue")}${b.escalas_max === 0 ? "Solo directos" : `Máx. ${b.escalas_max} escala${b.escalas_max > 1 ? "s" : ""} de ${b.escala_max_horas} h`}</span>
-          ${presupuesto ? `<span class="chip primario">${icono("euro")}Máximo ${eur(presupuesto)}</span>` : `<span class="chip primario">${icono("baja")}Lo más barato</span>`}
+          ${presupuesto ? `<span class="chip primario">${icono("euro")}Objetivo ${eur(presupuesto)}</span>` : `<span class="chip primario">${icono("baja")}Lo más barato</span>`}
           ${b.activa ? "" : `<span class="chip mal">${icono("pausa")}En pausa</span>`}
         </div>
       </section>
@@ -173,41 +225,46 @@ export async function vistaDetalle(app, id) {
             <div class="fila pequeno suave" style="margin-top:.35rem;gap:.9rem">
               ${b.activa ? '<span class="vivo"><span class="punto-vivo"></span>En directo</span>' : '<span class="chip mal">En pausa</span>'}
               <span>Próxima revisión <b class="cuenta-atras" id="cuenta">${b.activa ? cuentaAtras(b.proxima_revision) : "—"}</b></span>
-              <span id="revisado">${b.ultima_revision ? `Revisado ${hace(b.ultima_revision)}` : "Aún sin revisar"}</span>
+              <span id="revisado"></span>
             </div>
           </div>
           <div class="fila">
+            <div class="buscando oculto" id="buscando"></div>
             <div class="precio-grande gigante texto-degradado" id="precio-actual">—</div>
             <span id="delta-actual">${info.variacion != null ? deltaHtml(info.variacion) : ""}</span>
           </div>
         </div>
+        <div class="veredicto" id="veredicto"></div>
         <div class="selector" id="selector" style="margin-bottom:.8rem">
           ${Object.keys(PERIODOS).map((p) => `<button type="button" data-periodo="${p}">${p === "24h" ? "24 h" : p === "7d" ? "7 días" : "Todo"}</button>`).join("")}
         </div>
-        ${historial.length > 1
-          ? '<div class="grafica"><canvas id="grafica" aria-label="Evolución del precio total"></canvas></div>'
-          : `<div class="vacio" style="padding:2rem 1rem"><div class="ilustracion">${icono("grafica")}</div>
-              <p>La gráfica aparecerá en cuanto el robot haya revisado esta búsqueda dos veces (unos minutos).</p></div>`}
+        <div id="zona-grafica">${historial.length ? '<div class="grafica"><canvas id="grafica" aria-label="Evolución del precio total"></canvas></div>' : placeholderGrafica}</div>
         <div class="estadisticas" id="estadisticas" style="margin-top:1.1rem"></div>
-        ${rechazos.length ? `<div class="nota alerta">${icono("aviso")}<span><b>Vuelos descartados por tus filtros:</b> ${rechazos.map(([m, n]) => `${esc(m)} (${n})`).join(" · ")}</span></div>` : ""}
-        ${b.estado ? `<div class="nota" style="margin-top:.8rem">${icono("info")}<span id="estado">${esc(b.estado)}</span></div>` : ""}
+        <div class="nota alerta ${Object.keys(info.rechazos || {}).length ? "" : "oculto"}" id="rechazos">${notaRechazos(info.rechazos)}</div>
+        <div class="nota ${b.estado ? "" : "oculto"}" style="margin-top:.8rem">${icono("info")}<span id="estado">${esc(b.estado || "")}</span></div>
       </section>
 
       <div class="rejilla-2" style="margin-top:1.1rem">
         <section class="tarjeta">
           <div class="tarjeta-titulo"><h2>${icono("avion")}Mejores vuelos ahora</h2>
-            ${opciones.length ? `<span class="pequeno tenue">${fechaHora(opciones[0].revisado)}</span>` : ""}</div>
+            <span class="pequeno tenue" id="opciones-fecha">${opciones.length ? fechaHora(opciones[0].revisado) : ""}</span></div>
           <div id="opciones">
             ${opcionesAntiguas ? `<div class="nota alerta">${icono("aviso")}<span>Son de la revisión del ${fechaHora(opciones[0].revisado)}: en la última no hubo ninguna válida.</span></div>` : ""}
             ${opciones.length
               ? opciones.map((p, i) => tarjetaVuelo(p, aerolineas, i === 0)).join("")
-              : '<p class="suave">Todavía no hay resultados. El robot revisa esta búsqueda en unos minutos.</p>'}
+              : '<p class="suave">Todavía no hay resultados: aparecerán aquí solos con la primera revisión.</p>'}
           </div>
-          ${opciones.length ? `<p class="pequeno tenue" style="margin:.9rem 0 0">Precio total para todos los pasajeros. Compra siempre en la web oficial y comprueba el precio final antes de pagar.</p>` : ""}
+          <p class="pequeno tenue" style="margin:.9rem 0 0">Precio total para todos los pasajeros. Puedes comprar cuando quieras, aunque no
+            haya llegado a tu objetivo: compra siempre en la web oficial y comprueba el precio final antes de pagar.</p>
         </section>
         <div>
           <section class="tarjeta">
-            <div class="tarjeta-titulo"><h2>${icono("baja")}Cambios de precio</h2><span class="chip" id="num-cambios">0</span></div>
+            <div class="tarjeta-titulo"><h2>${icono("reloj")}Historial de precios</h2>
+              <div class="selector" id="vista-historial">
+                <button type="button" data-vista="todas" class="activo">Todas</button>
+                <button type="button" data-vista="cambios">Solo cambios</button>
+              </div></div>
+            <p class="pequeno suave" id="resumen-historial" style="margin-top:-.4rem"></p>
             <ul class="cambios" id="cambios"></ul>
           </section>
           <section class="tarjeta">
@@ -223,32 +280,70 @@ export async function vistaDetalle(app, id) {
       </div>
     </div>`;
 
-  // ---- Precio actual, estadísticas y cambios ----
+  // ---- Precio actual (o "buscando…") y veredicto ----
   const precioEl = $("#precio-actual");
-  let precioMostrado = b.precio_actual != null ? Number(b.precio_actual) : null;
-  contarHasta(precioEl, precioMostrado);
-  pintarEstadisticas($("#estadisticas"), historial);
-  const listaCambios = $("#cambios");
-  const pintarCambios = () => {
-    const cambios = cambiosDePrecio(historial);
-    $("#num-cambios").textContent = cambios.length;
-    listaCambios.innerHTML = cambios.length
-      ? cambios.slice(0, 60).map((c) => filaCambio(c)).join("")
-      : '<li class="suave" style="display:block">Sin cambios todavía: el precio se mantiene igual en cada revisión.</li>';
+  const buscandoEl = $("#buscando");
+  let precioMostrado = null;
+  const mostrarPrecio = (ahora) => {
+    const hay = ahora !== null && ahora !== undefined;
+    precioEl.classList.toggle("oculto", !hay);
+    buscandoEl.classList.toggle("oculto", hay);
+    if (!hay) {
+      buscandoEl.innerHTML = b.ultima_revision
+        ? `${icono("aviso")}Sin vuelos válidos ahora mismo`
+        : '<span class="anillo-mini"></span>Buscando tu vuelo…';
+    } else if (ahora !== precioMostrado) {
+      contarHasta(precioEl, ahora, { desde: precioMostrado ?? 0 });
+      if (precioMostrado !== null) destello(precioEl.closest(".tarjeta"), ahora - precioMostrado);
+    }
+    precioMostrado = hay ? ahora : null;
+    $("#veredicto").innerHTML = veredictoHtml(precioMostrado, historial, presupuesto);
   };
-  pintarCambios();
+  mostrarPrecio(b.precio_actual != null ? Number(b.precio_actual) : null);
+  pintarEstadisticas($("#estadisticas"), historial);
+
+  // ---- Historial: todas las revisiones o solo los cambios ----
+  let vistaHistorial = "todas";
+  const listaCambios = $("#cambios");
+  const pintarHistorial = (marcarNuevo = false) => {
+    const cambios = cambiosDePrecio(historial);
+    $("#resumen-historial").textContent = historial.length
+      ? `${historial.length} revisi${historial.length === 1 ? "ón" : "ones"} · ${cambios.length} cambio${cambios.length === 1 ? "" : "s"} de precio`
+      : "";
+    if (vistaHistorial === "cambios") {
+      listaCambios.innerHTML = cambios.length
+        ? cambios.slice(0, 200).map(filaCambio).join("")
+        : '<li class="suave" style="display:block">Sin cambios todavía: el precio se mantiene igual en cada revisión.</li>';
+    } else {
+      const ultimas = historial.slice(-200);
+      const desplazamiento = historial.length - ultimas.length;
+      listaCambios.innerHTML = ultimas.length
+        ? ultimas.map((p, i) => filaRevision(p, historial[desplazamiento + i - 1])).reverse().join("")
+        : '<li class="suave" style="display:block">Cada revisión del robot aparecerá aquí, haya cambiado el precio o no.</li>';
+    }
+    if (marcarNuevo) listaCambios.firstElementChild?.classList.add("nuevo");
+  };
+  pintarHistorial();
+  app.querySelectorAll("[data-vista]").forEach((boton) =>
+    boton.addEventListener("click", () => {
+      vistaHistorial = boton.dataset.vista;
+      app.querySelectorAll("[data-vista]").forEach((x) => x.classList.toggle("activo", x === boton));
+      pintarHistorial();
+    }),
+  );
 
   // ---- Gráfica con periodos ----
   let grafica = null;
   const pintarGrafica = () => {
     grafica?.destruir();
+    grafica = null;
+    app.querySelectorAll("[data-periodo]").forEach((x) => x.classList.toggle("activo", x.dataset.periodo === periodo));
     const canvas = $("#grafica");
     if (!canvas) return;
     const dias = PERIODOS[periodo];
     const desde = dias ? new Date(Date.now() - dias * 86400000).toISOString() : null;
     const puntos = desde ? historial.filter((h) => h.revisado >= desde) : historial;
-    grafica = graficaPrecios(canvas, puntos.length > 1 ? puntos : historial, { presupuesto });
-    app.querySelectorAll("[data-periodo]").forEach((x) => x.classList.toggle("activo", x.dataset.periodo === periodo));
+    grafica = graficaPrecios(canvas, puntos.length ? puntos : historial, { presupuesto });
   };
   pintarGrafica();
   alSalir(() => grafica?.destruir());
@@ -259,45 +354,49 @@ export async function vistaDetalle(app, id) {
     }),
   );
 
-  // ---- Cuenta atrás ----
-  let proxima = b.proxima_revision;
-  let ultimaRevision = b.ultima_revision;
-  const textoRevisado = () => (ultimaRevision ? `Revisado ${hace(ultimaRevision)}` : "Aún sin revisar");
-  if (b.activa) cadaSegundos(1, () => { $("#cuenta").textContent = cuentaAtras(proxima); });
+  // ---- Cuenta atrás y "revisado hace…" ----
+  const textoRevisado = () => (b.ultima_revision ? `Revisado ${hace(b.ultima_revision)}` : "Aún sin revisar");
+  $("#revisado").textContent = textoRevisado();
+  if (b.activa) cadaSegundos(1, () => { $("#cuenta").textContent = cuentaAtras(b.proxima_revision); });
   cadaSegundos(30, () => { $("#revisado").textContent = textoRevisado(); });
 
-  // ---- Tiempo real ----
+  // ---- Tiempo real: cada revisión añade su punto (suba, baje o siga igual) ----
   let tiempoRealActivo = false;
   alSalir(api.suscribir("precios", ({ new: p }) => {
     if (!p || p.busqueda !== id || p.es_mejor === false) return;
+    if (historial.some((h) => h.revisado === p.revisado)) return;
     tiempoRealActivo = true;
-    const anterior = historial.at(-1);
     historial.push(p);
-    if (historial.length === 2) return recargar(); // ya hay datos para la gráfica
-    grafica?.añadir(p);
-    pintarEstadisticas($("#estadisticas"), historial);
-    if (anterior && Math.abs(Number(p.precio_total) - Number(anterior.precio_total)) >= 0.01) {
-      pintarCambios();
-      listaCambios.firstElementChild?.classList.add("nuevo");
+    if (!$("#grafica")) {
+      $("#zona-grafica").innerHTML = '<div class="grafica"><canvas id="grafica" aria-label="Evolución del precio total"></canvas></div>';
+      pintarGrafica();
+    } else if (grafica) {
+      grafica.añadir(p);
+    } else {
+      pintarGrafica();
     }
+    pintarEstadisticas($("#estadisticas"), historial);
+    pintarHistorial(true);
+    mostrarPrecio(Number(p.precio_total));
   }, `busqueda=eq.${id}`));
   alSalir(api.suscribir("busquedas", async ({ new: nueva }) => {
     if (!nueva || nueva.id !== id) return;
     tiempoRealActivo = true;
-    proxima = nueva.proxima_revision;
-    ultimaRevision = nueva.ultima_revision;
+    b = { ...b, ...nueva };
     $("#revisado").textContent = textoRevisado();
-    if ($("#estado")) $("#estado").textContent = nueva.estado || "";
-    const ahora = nueva.precio_actual != null ? Number(nueva.precio_actual) : null;
-    if (ahora !== precioMostrado) {
-      contarHasta(precioEl, ahora, { desde: precioMostrado ?? ahora ?? 0 });
-      if (precioMostrado != null && ahora != null) destello(precioEl.closest(".tarjeta"), ahora - precioMostrado);
-      precioMostrado = ahora;
-    }
+    $("#estado").textContent = nueva.estado || "";
+    $("#estado").closest(".nota").classList.toggle("oculto", !nueva.estado);
+    const rechazos = $("#rechazos");
+    rechazos.innerHTML = notaRechazos(nueva.info?.rechazos);
+    rechazos.classList.toggle("oculto", !rechazos.innerHTML);
+    mostrarPrecio(nueva.precio_actual != null ? Number(nueva.precio_actual) : null);
     $("#delta-actual").innerHTML = nueva.info?.variacion != null ? deltaHtml(nueva.info.variacion) : "";
     // Vuelos de la revisión nueva
     const nuevas = await api.ultimasOpciones(id);
-    if (nuevas.length) $("#opciones").innerHTML = nuevas.map((p, i) => tarjetaVuelo(p, aerolineas, i === 0)).join("");
+    if (nuevas.length) {
+      $("#opciones").innerHTML = nuevas.map((p, i) => tarjetaVuelo(p, aerolineas, i === 0)).join("");
+      $("#opciones-fecha").textContent = fechaHora(nuevas[0].revisado);
+    }
   }, `id=eq.${id}`));
   // Respaldo por si el tiempo real no está activado: recargar cada 90 s
   cadaSegundos(90, () => !tiempoRealActivo && recargar());

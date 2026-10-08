@@ -39,6 +39,7 @@ BLOQUEO_MAX = timedelta(hours=48)
 OPCIONES_GUARDADAS = 5
 ESPERA_ENTRE_VUELTAS_S = 60  # en modo continuo: cada minuto se mira Telegram y qué toca revisar
 MARGEN_FINAL_S = 15 * 60  # en modo continuo no se empieza una ronda si queda menos que esto
+PRIMERA_REVISION_MIN = 2  # una búsqueda nueva se mira en cuanto la web lleve 2 min sin consultarse
 LIMPIEZA_CADA = timedelta(hours=6)
 VERSION_DATOS = 2
 
@@ -312,6 +313,30 @@ def procesar_busqueda(
 # ----------------------------------------------------------------------------------------
 # Una ronda
 # ----------------------------------------------------------------------------------------
+def es_nueva(b: dict) -> bool:
+    """Búsqueda recién creada (o recién editada) que todavía no tiene precio."""
+    ultima = b.get("ultima_revision")
+    desde = b.get("historial_desde")
+    return not ultima or bool(desde and _fecha_hora(desde) > _fecha_hora(ultima))
+
+
+def fuentes_listas(config: dict, pendientes: list[dict], ahora: datetime, forzar: bool) -> list[str]:
+    """Webs que se pueden consultar ya. Una búsqueda nueva no espera al ritmo normal de cada web
+    (para ver su primer precio cuanto antes), pero sí un mínimo entre consultas; los bloqueos se respetan siempre."""
+    hay_nuevas = any(es_nueva(b) for b in pendientes)
+    listas = []
+    for nombre, cfg in config.items():
+        bloqueada = _fecha_hora(cfg.get("bloqueada_hasta"))
+        ultima = _fecha_hora(cfg.get("ultima_ronda"))
+        if not cfg["activa"] or (bloqueada and bloqueada > ahora):
+            continue
+        intervalo = min(cfg["intervalo_min"], PRIMERA_REVISION_MIN) if hay_nuevas else cfg["intervalo_min"]
+        if not forzar and ultima and ahora - ultima < timedelta(minutes=intervalo):
+            continue
+        listas.append(nombre)
+    return listas
+
+
 def ronda(db: Supabase, tg: Telegram | None, url_web: str | None, forzar: bool, limite_s: float) -> dict | None:
     """Revisa las búsquedas a las que les toca. Devuelve el resumen, o None si no había nada que hacer."""
     ahora = datetime.now(timezone.utc)
@@ -328,15 +353,7 @@ def ronda(db: Supabase, tg: Telegram | None, url_web: str | None, forzar: bool, 
     pendientes.sort(key=lambda b: str(b.get("fecha_ida") or b.get("chollo_desde")))  # primero los viajes cercanos
 
     config = {f["fuente"]: f for f in db.leer("estado_fuentes")}
-    listas = []
-    for nombre, cfg in config.items():
-        bloqueada = _fecha_hora(cfg.get("bloqueada_hasta"))
-        ultima = _fecha_hora(cfg.get("ultima_ronda"))
-        if not cfg["activa"] or (bloqueada and bloqueada > ahora):
-            continue
-        if not forzar and ultima and ahora - ultima < timedelta(minutes=cfg["intervalo_min"]):
-            continue
-        listas.append(nombre)
+    listas = fuentes_listas(config, pendientes, ahora, forzar)
     if not listas:
         return None
 

@@ -22,10 +22,25 @@ function rutaHtml(datos, origen, destino, idaVuelta) {
     </div>`;
 }
 
+/** Texto bajo el precio: lo lejos que está de tu objetivo, o el mínimo visto. */
+function etiquetaPrecio(b) {
+  if (b.precio_actual == null) return b.ultima_revision ? "sin vuelos válidos ahora mismo" : "primer precio en unos minutos";
+  if (b.modo_precio === "presupuesto" && b.presupuesto != null) {
+    const dif = Number(b.precio_actual) - Number(b.presupuesto);
+    return dif <= 0.005 ? `✓ dentro de tu objetivo de ${eur(b.presupuesto, true)}` : `a ${eur(dif)} de tu objetivo de ${eur(b.presupuesto, true)}`;
+  }
+  return b.mejor_precio != null ? `mínimo visto ${eur(b.mejor_precio)}` : "precio total para todos";
+}
+
+function precioInicial(b) {
+  if (b.precio_actual != null) return eur(b.precio_actual);
+  return b.ultima_revision ? "—" : '<span class="buscando"><span class="anillo-mini"></span>Buscando…</span>';
+}
+
 function tarjetaBusqueda(b, datos) {
   const variacion = b.info?.variacion;
   const presupuesto = b.modo_precio === "presupuesto"
-    ? `<span class="chip ${b.precio_actual != null && Number(b.precio_actual) <= Number(b.presupuesto) ? "ok" : ""}">${icono("euro")}Máx. ${eur(b.presupuesto, true)}</span>`
+    ? `<span class="chip ${b.precio_actual != null && Number(b.precio_actual) <= Number(b.presupuesto) ? "ok" : ""}">${icono("euro")}Objetivo ${eur(b.presupuesto, true)}</span>`
     : `<span class="chip primario">${icono("baja")}Lo más barato</span>`;
   const tipo = b.modo === "chollo" ? `<span class="chip alerta">${icono("llama")}Chollo</span>` : "";
   return `
@@ -44,8 +59,8 @@ function tarjetaBusqueda(b, datos) {
       </div>
       <div class="precio-bloque">
         <div>
-          <div class="precio-grande" data-precio>${b.precio_actual != null ? eur(b.precio_actual) : "—"}</div>
-          <div class="precio-etiqueta">${b.mejor_precio != null ? `mínimo visto ${eur(b.mejor_precio)}` : "precio total para todos"}</div>
+          <div class="precio-grande" data-precio>${precioInicial(b)}</div>
+          <div class="precio-etiqueta" data-etiqueta>${esc(etiquetaPrecio(b))}</div>
         </div>
         <div data-delta>${variacion != null ? deltaHtml(variacion) : ""}</div>
       </div>
@@ -136,7 +151,7 @@ export async function vistaPanel(app) {
   const graficas = new Map();
   for (const b of busquedas) {
     const tarjeta = app.querySelector(`[data-id="${b.id}"]`);
-    contarHasta(tarjeta.querySelector("[data-precio]"), b.precio_actual != null ? Number(b.precio_actual) : null);
+    if (b.precio_actual != null) contarHasta(tarjeta.querySelector("[data-precio]"), Number(b.precio_actual));
     const puntos = historial.filter((h) => h.busqueda === b.id && (!b.historial_desde || h.revisado >= b.historial_desde));
     graficas.set(b.id, miniGrafica(tarjeta.querySelector("canvas"), puntos, {
       presupuesto: b.modo_precio === "presupuesto" ? b.presupuesto : null,
@@ -152,8 +167,10 @@ export async function vistaPanel(app) {
     const precioEl = tarjeta.querySelector("[data-precio]");
     const antes = Number(String(precioEl.dataset.valor ?? "")) || null;
     const ahora = b.precio_actual != null ? Number(b.precio_actual) : null;
-    contarHasta(precioEl, ahora, { desde: antes ?? ahora ?? 0 });
+    if (ahora === null) precioEl.innerHTML = precioInicial(b);
+    else contarHasta(precioEl, ahora, { desde: antes ?? 0 });
     precioEl.dataset.valor = ahora ?? "";
+    tarjeta.querySelector("[data-etiqueta]").textContent = etiquetaPrecio(b);
     if (antes != null && ahora != null && antes !== ahora) destello(tarjeta, ahora - antes);
     tarjeta.querySelector("[data-delta]").innerHTML = b.info?.variacion != null ? deltaHtml(b.info.variacion) : "";
     tarjeta.querySelector("[data-estado]").textContent = b.estado || "";
@@ -161,7 +178,14 @@ export async function vistaPanel(app) {
   }));
   alSalir(api.suscribir("precios", ({ new: p }) => {
     tiempoRealActivo = true;
-    if (p?.es_mejor !== false && graficas.get(p?.busqueda)) graficas.get(p.busqueda).añadir(p);
+    if (!p || p.es_mejor === false) return;
+    if (graficas.get(p.busqueda)) return graficas.get(p.busqueda).añadir(p);
+    const b = busquedas.find((x) => x.id === p.busqueda);
+    const canvas = app.querySelector(`[data-id="${p.busqueda}"] canvas`);
+    if (!b || !canvas) return;
+    historial.push(p);
+    const puntos = historial.filter((h) => h.busqueda === b.id && (!b.historial_desde || h.revisado >= b.historial_desde));
+    graficas.set(b.id, miniGrafica(canvas, puntos, { presupuesto: b.modo_precio === "presupuesto" ? b.presupuesto : null }));
   }));
   for (const b of busquedas) app.querySelector(`[data-id="${b.id}"] [data-precio]`).dataset.valor = b.precio_actual ?? "";
   // Respaldo por si el tiempo real no está activado en Supabase: recargar cada 2 minutos
