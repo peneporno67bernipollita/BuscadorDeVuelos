@@ -8,14 +8,12 @@ import httpx
 class Supabase:
     def __init__(self, url: str, clave_servicio: str):
         self.base = url.rstrip("/") + "/rest/v1"
-        self.http = httpx.Client(
-            headers={
-                "apikey": clave_servicio,
-                "Authorization": f"Bearer {clave_servicio}",
-                "Content-Type": "application/json",
-            },
-            timeout=30,
-        )
+        cabeceras = {"apikey": clave_servicio, "Content-Type": "application/json"}
+        # Las claves nuevas (sb_secret_...) no son JWT y solo van en "apikey";
+        # la antigua service_role (JWT) también debe ir como Bearer.
+        if not clave_servicio.startswith("sb_"):
+            cabeceras["Authorization"] = f"Bearer {clave_servicio}"
+        self.http = httpx.Client(headers=cabeceras, timeout=30)
 
     def _revisar(self, r: httpx.Response) -> httpx.Response:
         if r.status_code >= 400:

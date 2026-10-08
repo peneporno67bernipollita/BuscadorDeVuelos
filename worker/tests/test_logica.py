@@ -159,3 +159,15 @@ def test_chollo_por_calendario():
     calendario = [100, 110, 120, 130, 140, 150, 160, 170]
     assert decidir(b, _con_total(140, billetes=95), [], calendario, date(2026, 10, 1)).tipo == "chollo"
     assert decidir(b, _con_total(160, billetes=125), [], calendario, date(2026, 10, 1)).avisar is False
+
+
+# ---------------- conexión con Supabase ----------------
+
+def test_cabeceras_segun_tipo_de_clave():
+    from buscador.db import Supabase
+
+    nueva = Supabase("https://x.supabase.co", "sb_secret_abc")
+    assert nueva.http.headers["apikey"] == "sb_secret_abc"
+    assert "authorization" not in nueva.http.headers  # las claves sb_ no son JWT
+    antigua = Supabase("https://x.supabase.co", "eyJhbGciOi.antigua")
+    assert antigua.http.headers["authorization"] == "Bearer eyJhbGciOi.antigua"

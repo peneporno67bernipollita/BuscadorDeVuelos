@@ -7,8 +7,9 @@ Todo es gratis. Tardarás unos 30 minutos. Necesitas:
 - **Cloudflare Pages**: aloja la web para que la abras desde el móvil o el PC.
 - **Telegram**: te llegan los avisos.
 
-> 🔐 **Regla de oro:** hay dos claves de Supabase. La **anon** es pública (va en la web).
-> La **service_role** es secreta: solo se pega en los *secretos* de GitHub, nunca en el código ni en un chat.
+> 🔐 **Regla de oro:** hay dos claves de Supabase. La **publishable** (`sb_publishable_...`) es pública y va en la web.
+> La **secret** (`sb_secret_...`) es secreta: solo se pega en los *secretos* de GitHub, nunca en el código ni en un chat.
+> (Las antiguas *anon* y *service_role* también funcionan, pero Supabase las retira a finales de 2026.)
 
 ---
 
@@ -22,22 +23,22 @@ Todo es gratis. Tardarás unos 30 minutos. Necesitas:
 3. Cuando termine de crearse, ve a **SQL Editor** → **New query**.
 4. Abre el archivo [`supabase/instalar.sql`](../supabase/instalar.sql) de este repositorio. Copia **todo** su contenido, pégalo y pulsa **Run**.
    Debe terminar con *Success*. Se puede volver a ejecutar sin problema; por ejemplo, tras una actualización.
-5. Ve a **Project Settings → API** (o **Data API** / **API Keys**). Apunta estos tres datos:
-   - **Project URL**: algo como `https://abcdxyz.supabase.co`.
-   - **anon public key**: es pública y va en la web.
-   - **service_role key**: es **secreta** y solo va en GitHub.
+5. Apunta estos tres datos:
+   - **Project URL** (en **Project Settings → Data API**): algo como `https://abcdxyz.supabase.co`.
+   - **Publishable key** (en **Project Settings → API Keys**): empieza por `sb_publishable_`. Es pública y va en la web.
+   - **Secret key** (misma pantalla, pulsa el ojo para verla): empieza por `sb_secret_`. Es **secreta** y solo va en GitHub.
 
 ## 2. Conectar la web con tu base de datos
 
-Edita [`web/js/config.js`](../web/js/config.js) y pon tu *Project URL* y tu clave **anon**:
+Edita [`web/js/config.js`](../web/js/config.js) y pon tu *Project URL* y tu clave **publishable**:
 
 ```js
 export const SUPABASE_URL = "https://abcdxyz.supabase.co";
-export const SUPABASE_ANON_KEY = "eyJhbGciOi...";
+export const SUPABASE_ANON_KEY = "sb_publishable_...";
 ```
 
 Desde GitHub: abre el archivo → icono del lápiz → cambia las dos líneas → **Commit changes**.
-Si lo prefieres, pásame la URL y la clave **anon** (la pública, nunca la service_role) y lo hago yo.
+Si lo prefieres, pásame la URL y la clave **publishable** (la pública, nunca la secret) y lo hago yo.
 
 ## 3. Publicar la web (Cloudflare Pages)
 
@@ -77,7 +78,7 @@ En la pestaña **Secrets**, pulsa **New repository secret** tres veces:
 | Nombre | Valor |
 |---|---|
 | `SUPABASE_URL` | La *Project URL* de Supabase |
-| `SUPABASE_SERVICE_KEY` | La clave **service_role** (la secreta) |
+| `SUPABASE_SERVICE_KEY` | La **Secret key** (`sb_secret_...`) |
 | `TELEGRAM_BOT_TOKEN` | El token de BotFather |
 
 En la pestaña **Variables**, pulsa **New repository variable**:
