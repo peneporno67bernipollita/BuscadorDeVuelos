@@ -93,6 +93,9 @@ def vincular_telegram(db: Supabase, tg: Telegram, perfiles: dict[str, dict]) -> 
             perfil["telegram_chat_id"] = str(chat)
             tg.enviar(chat, "✅ ¡Listo! Este chat queda vinculado a tu Buscador de Vuelos. Aquí te llegarán los avisos.")
             vinculados += 1
+        elif chat and str(chat) in {str(p.get("telegram_chat_id")) for p in perfiles.values()}:
+            if texto.startswith("/start"):
+                tg.enviar(chat, "✅ Este chat ya está vinculado. Aquí te llegarán los avisos de tus búsquedas.")
         elif chat and texto.startswith("/start"):
             tg.enviar(chat, "Hola 👋 Para vincular este chat envíame el código que aparece en tu web (Perfil → Telegram).")
     if ultimo != offset:

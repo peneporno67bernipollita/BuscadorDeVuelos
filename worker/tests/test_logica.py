@@ -178,3 +178,13 @@ def test_url_con_o_sin_rest_v1():
 
     for url in ("https://x.supabase.co", "https://x.supabase.co/", "https://x.supabase.co/rest/v1/"):
         assert Supabase(url, "sb_secret_abc").base == "https://x.supabase.co/rest/v1"
+
+
+def test_clasificar_respuestas_de_google():
+    from buscador.fuentes.google_flights import describir_respuesta
+
+    assert describir_respuesta(200, ")]}'\n[[1]]").startswith("datos normales")
+    assert describir_respuesta(429, "<html>").startswith("bloqueo")
+    assert describir_respuesta(200, "<html>Our systems have detected unusual traffic").startswith("bloqueo")
+    assert describir_respuesta(200, '<html><a href="https://consent.google.com/x">').startswith("página de consentimiento")
+    assert describir_respuesta(200, "<html><body>hola</body></html>").startswith("página HTML")

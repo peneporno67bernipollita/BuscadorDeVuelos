@@ -67,6 +67,20 @@ def _es_bloqueo(error: Exception) -> bool:
     return any(s in texto for s in ("429", "403", "unusual traffic", "captcha", "too many requests"))
 
 
+def describir_respuesta(estado: int, cuerpo: str) -> str:
+    """Clasifica una respuesta de Google sin copiar su contenido (puede llevar datos de la búsqueda)."""
+    texto = cuerpo[:5000].lower()
+    if estado == 429 or "unusual traffic" in texto or "/sorry/" in texto or "captcha" in texto:
+        return f"bloqueo (HTTP {estado})"
+    if "consent.google" in texto or "before you continue" in texto or "antes de ir a google" in texto:
+        return f"página de consentimiento de cookies (HTTP {estado})"
+    if cuerpo.lstrip().startswith(")]}'"):
+        return f"datos normales (HTTP {estado}, {len(cuerpo)} bytes)"
+    if "<html" in texto:
+        return f"página HTML inesperada (HTTP {estado}, {len(cuerpo)} bytes)"
+    return f"respuesta desconocida (HTTP {estado}, {len(cuerpo)} bytes)"
+
+
 class GoogleFlights:
     nombre = "google_flights"
 
@@ -77,6 +91,20 @@ class GoogleFlights:
         self.incluir = [a for c in sorted(codigos_permitidos) if (a := self._aerolinea(c))]
         self.peticiones = 0
         self._primera = True
+        self.respuestas: list[str] = []  # clasificación de cada respuesta de Google (diagnóstico)
+        self._vigilar_respuestas()
+
+    def _vigilar_respuestas(self) -> None:
+        """Anota qué tipo de respuesta da Google: la librería devuelve 0 vuelos sin avisar si no es la normal."""
+        cliente = get_client()
+        original = type(cliente).post
+
+        def post(cliente_, *args, **kwargs):
+            r = original(cliente_, *args, **kwargs)
+            self.respuestas.append(describir_respuesta(r.status_code, r.text))
+            return r
+
+        cliente.post = post.__get__(cliente)
 
     @staticmethod
     def _aerolinea(codigo: str):
@@ -288,4 +316,11 @@ class GoogleFlights:
                 continue
             res.opciones += self.vuelos(b, fi, fv, validador)
         res.peticiones = self.peticiones - antes
+
+        recientes = self.respuestas[-res.peticiones:] if res.peticiones else []
+        if any(r.startswith("bloqueo") for r in recientes):
+            raise FuenteBloqueada("Google Flights ha respondido con su página de tráfico inusual")
+        if not res.opciones:
+            tipos = sorted(set(recientes)) or ["ninguna respuesta"]
+            res.error = "Google no devolvió vuelos. Respuestas: " + " | ".join(tipos)
         return res
