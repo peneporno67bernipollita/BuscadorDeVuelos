@@ -160,8 +160,8 @@ def alarma(tema: str, titulo: str, texto: str, enlace: str | None = None,
     return r.status_code == 200
 
 
-def texto_alarma(b: dict, total: float) -> str:
-    return f"{b['nombre']}: {eur(total)} en total. Toca para verlo o pulsa Comprar ya."
+def texto_alarma(b: dict, total: float, motivo: str = "") -> str:
+    return f"{b['nombre']}: {eur(total)} en total. {motivo} Toca para verlo o pulsa Comprar ya.".replace("  ", " ")
 
 
 LIMITE_TELEGRAM = 4000  # Telegram admite 4096 caracteres por mensaje

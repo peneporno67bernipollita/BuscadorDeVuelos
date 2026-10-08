@@ -309,7 +309,7 @@ def procesar_busqueda(
         chat = (perfil or {}).get("telegram_chat_id")
         entregado = bool(tg and chat and tg.enviar(chat, texto))
         if decision.tipo in TIPOS_ALARMA and (perfil or {}).get("alarma_chollos") and (perfil or {}).get("ntfy_tema"):
-            alarma(perfil["ntfy_tema"], TIPOS_ALARMA[decision.tipo], texto_alarma(b, mejor.precio_total),
+            alarma(perfil["ntfy_tema"], decision.titulo, texto_alarma(b, mejor.precio_total, decision.motivo),
                    enlace=f"{url_web.rstrip('/')}/#/busqueda/{b['id']}" if url_web else None,
                    comprar=enlaces.comprar_ya(b, mejor))
         db.insertar("avisos", {

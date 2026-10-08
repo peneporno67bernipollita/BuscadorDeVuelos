@@ -266,13 +266,20 @@ def test_chollo_nunca_mas_caro_que_el_minimo_visto():
     assert decidir(b, _con_total(165, billetes=165), [171, 175], calendario, date(2026, 10, 8)).tipo == "chollo"
 
 
+def test_chollo_dice_el_porcentaje_exacto():
+    b = busqueda(modo="chollo", chollo_desde="2026-10-09", chollo_hasta="2026-10-28")
+    calendario = [150, 180, 195, 201, 201, 220, 260, 300, 340]  # mediana 201 €
+    d = decidir(b, _con_total(122, billetes=122), [], calendario, date(2026, 10, 8))
+    assert d.tipo == "chollo" and "39 % más baratos" in d.motivo and "201,00 €" in d.motivo and "−39 %" in d.titulo
+
+
 def test_cerca_del_objetivo_y_despues_dentro():
     b = busqueda(modo_precio="presupuesto", presupuesto=30)
     hoy = date(2026, 9, 1)
-    cerca = decidir(b, _con_total(45), [60], [], hoy)  # objetivo 30: avisa hasta 50 €
-    assert cerca.tipo == "cerca_objetivo" and cerca.fija_precio
-    assert decidir(b, _con_total(55), [60], [], hoy).avisar is False
-    assert decidir(b, _con_total(45), [40], [], hoy).avisar is False  # ya se vio más barato
+    cerca = decidir(b, _con_total(35), [60], [], hoy)  # objetivo 30: avisa hasta 36 € (+20 %)
+    assert cerca.tipo == "cerca_objetivo" and cerca.fija_precio and "17 %" in cerca.motivo
+    assert decidir(b, _con_total(37), [39], [], hoy).avisar is False  # 37 € pasa de 36 € (+20 %) y no es bajada fuerte
+    assert decidir(b, _con_total(35), [34], [], hoy).avisar is False  # ya se vio más barato
     # Ya avisado a 45 €: al bajar de 30 llega el aviso de "dentro de tu presupuesto", aunque baje poco
     ya = busqueda(modo_precio="presupuesto", presupuesto=30, ultimo_aviso_precio=31)
     assert decidir(ya, _con_total(29.5), [31], [], hoy).tipo == "presupuesto"

@@ -29,10 +29,9 @@ HORAS_PARA_CHOLLO_ANTICIPADO = 24
 # Bajada fuerte: avisar aunque no sea "el momento" ni llegue a tu objetivo (p. ej. de 171 € a 70 €)
 BAJADA_FUERTE_PCT = 0.15
 BAJADA_FUERTE_EUR = 15.0
-# Modo presupuesto: avisar también si se queda cerca del objetivo (lo que sea mayor de las dos cosas).
-# P. ej. con 30 € de objetivo, hasta 50 €; con 600 €, hasta 720 €.
+# Modo presupuesto: avisar también si se queda cerca del objetivo: hasta un 20 % más caro.
+# P. ej. con 30 € de objetivo, hasta 36 €; con 60 €, hasta 72 €; con 600 €, hasta 720 €.
 CERCA_OBJETIVO_PCT = 0.20
-CERCA_OBJETIVO_EUR = 20.0
 
 
 @dataclass
@@ -66,7 +65,12 @@ def _no_supera_minimo(total: float, historial: list[float]) -> bool:
 
 
 def margen_objetivo(presupuesto: float) -> float:
-    return max(presupuesto * CERCA_OBJETIVO_PCT, CERCA_OBJETIVO_EUR)
+    return presupuesto * CERCA_OBJETIVO_PCT
+
+
+def _pct_menos(precio: float, referencia: float) -> int:
+    """Cuánto más barato (en %) es `precio` que `referencia`."""
+    return round((1 - precio / referencia) * 100) if referencia else 0
 
 
 def _bajada_fuerte(total: float, historial: list[float], contexto: dict) -> Decision | None:
@@ -148,7 +152,8 @@ def decidir(
         if total <= presupuesto + margen_objetivo(presupuesto) and _no_supera_minimo(total, historial):
             return Decision(
                 True, "cerca_objetivo", "🎯 ¡Muy cerca de tu objetivo!",
-                f"Total {_eur(total)}: solo {_eur(total - presupuesto)} por encima de tu objetivo de {_eur(presupuesto)}. "
+                f"Total {_eur(total)}: solo {_eur(total - presupuesto)} (un {round((total / presupuesto - 1) * 100)} %) "
+                f"por encima de tu objetivo de {_eur(presupuesto)}. "
                 "Si te vale, puede ser buen momento; sigo vigilando y te aviso si baja de tu objetivo.",
                 contexto=contexto,
             )
@@ -169,16 +174,17 @@ def decidir(
             umbral = min(_percentil(calendario, 20), mediana * 0.80)
             if mejor.precio_billetes <= umbral and _no_supera_minimo(total, historial):
                 return Decision(
-                    True, "chollo", "🔥 ¡Chollo encontrado!",
-                    f"Billetes a {_eur(mejor.precio_billetes)}, al menos un 20 % por debajo del precio "
-                    f"normal de esta ruta en tus fechas (mediana {_eur(mediana)}).",
+                    True, "chollo", f"🔥 ¡Chollo encontrado! −{_pct_menos(mejor.precio_billetes, mediana)} %",
+                    f"Billetes a {_eur(mejor.precio_billetes)}: un {_pct_menos(mejor.precio_billetes, mediana)} % más baratos "
+                    f"que el precio normal de esta ruta en tus fechas ({_eur(mediana)}).",
                     contexto=contexto,
                 )
         if (len(historial) >= 4 and horas_historial >= HORAS_PARA_MINIMO and total <= median(historial) * 0.80
                 and _no_supera_minimo(total, historial)):
             return Decision(
-                True, "chollo", "🔥 ¡Chollo encontrado!",
-                f"{_eur(total)}: un 20 % por debajo de lo que he visto hasta ahora en esta ruta.",
+                True, "chollo", f"🔥 ¡Chollo encontrado! −{_pct_menos(total, median(historial))} %",
+                f"{_eur(total)}: un {_pct_menos(total, median(historial))} % más barato que lo normal en lo que he visto "
+                f"hasta ahora en esta ruta ({_eur(median(historial))}).",
                 contexto=contexto,
             )
         return _bajada_fuerte(total, historial, contexto) or Decision(False, contexto=contexto)
@@ -224,15 +230,17 @@ def decidir(
     if (len(historial) >= 6 and horas_historial >= HORAS_PARA_CHOLLO_ANTICIPADO and total <= median(historial) * 0.80
             and _no_supera_minimo(total, historial)):
         return Decision(
-            True, "chollo", "🔥 Chollo anticipado",
-            f"Aún es pronto ({dias} días), pero {_eur(total)} está un 20 % por debajo de lo que he visto.",
+            True, "chollo", f"🔥 Chollo anticipado −{_pct_menos(total, median(historial))} %",
+            f"Aún es pronto ({dias} días), pero {_eur(total)} es un {_pct_menos(total, median(historial))} % más barato "
+            f"que lo normal en lo que he visto ({_eur(median(historial))}).",
             contexto=contexto,
         )
     if len(calendario) >= 10 and mejor.precio_billetes <= median(calendario) * 0.75 and _no_supera_minimo(total, historial):
         return Decision(
-            True, "chollo", "🔥 Chollo anticipado",
-            f"Aún es pronto ({dias} días), pero los billetes están un 25 % por debajo de lo normal "
-            "en fechas cercanas.",
+            True, "chollo", f"🔥 Chollo anticipado −{_pct_menos(mejor.precio_billetes, median(calendario))} %",
+            f"Aún es pronto ({dias} días), pero los billetes ({_eur(mejor.precio_billetes)}) son un "
+            f"{_pct_menos(mejor.precio_billetes, median(calendario))} % más baratos que lo normal en fechas cercanas "
+            f"({_eur(median(calendario))}).",
             contexto=contexto,
         )
     return _bajada_fuerte(total, historial, contexto) or Decision(False, contexto=contexto)

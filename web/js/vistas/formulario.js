@@ -270,7 +270,7 @@ export async function vistaFormulario(app, id, duplicar = false) {
               <label class="opcion-tarjeta"><input type="radio" name="modo_precio" value="mas_barato" ${b.modo_precio === "mas_barato" ? "checked" : ""}>
                 <span class="icono-opcion">${icono("baja")}</span><span><b>Lo más barato posible</b><small>El robot decide: mínimo de varias horas en la ventana más barata, chollos y un último aviso antes de las 3 semanas finales.</small></span></label>
               <label class="opcion-tarjeta"><input type="radio" name="modo_precio" value="presupuesto" ${b.modo_precio === "presupuesto" ? "checked" : ""}>
-                <span class="icono-opcion">${icono("euro")}</span><span><b>Tengo un objetivo de precio</b><small>Te aviso cuando el total (billetes + maletas − descuentos) no lo supere, y antes si se queda cerca: hasta +20 % o +20 € (lo que sea mayor).</small></span></label>
+                <span class="icono-opcion">${icono("euro")}</span><span><b>Tengo un objetivo de precio</b><small>Te aviso cuando el total (billetes + maletas − descuentos) no lo supere, y antes si se queda cerca: hasta un 20 % más caro (con 30 € de objetivo, hasta 36 €).</small></span></label>
             </div>
             <div class="campo" id="bloque-presupuesto" style="max-width:300px;margin-top:1rem">
               <label for="presupuesto">Total máximo para todos</label>
