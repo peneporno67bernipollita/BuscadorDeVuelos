@@ -124,6 +124,8 @@ def test_texto_y_parametros_de_la_llamada():
     assert http.params["user"] == "@guille" and http.params["lang"].startswith("es-ES") and http.params["cc"] == "no"
     Respuesta.text = "Error: user not authorized"
     assert llamar("@guille", "hola", http=http) is False
+    Respuesta.text = "Someone reported CallMeBot as spammer, please add @CallMeBot_API16 in your Telegram contacts"
+    assert llamar("@guille", "hola", http=http) is False
 
 
 def test_mensaje_de_prueba_desde_la_web():

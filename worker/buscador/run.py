@@ -197,7 +197,9 @@ def atender_telegram(db: Supabase, tg: Telegram, perfiles: dict[str, dict], url_
             if p.get("telegram_chat_id"):
                 tg.enviar(p["telegram_chat_id"], "📞 Llamada de prueba hecha: tu móvil debería haber sonado." if ok else (
                     "📞 No se pudo hacer la llamada de prueba. Comprueba que tu usuario de Telegram está bien escrito en la web "
-                    "y que has autorizado a CallMeBot enviando /start a @CallMeBot_txtbot."))
+                    "y que has autorizado a CallMeBot enviando /start a @CallMeBot_txtbot. Si CallMeBot te ha avisado de "
+                    "\"spam\", envía un mensaje a su bot de llamadas (@CallMeBot_API o @CallMeBot_API + número) y añádelo "
+                    "a tus contactos: https://www.callmebot.com/blog/spam-error/"))
     return vinculados
 
 

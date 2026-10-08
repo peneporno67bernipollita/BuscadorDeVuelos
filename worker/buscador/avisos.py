@@ -162,7 +162,9 @@ def llamar(usuario: str, texto: str, http=None) -> bool:
         log.warning("CallMeBot no responde: %s", type(e).__name__)
         return False
     cuerpo = r.text.lower()
-    ok = r.status_code == 200 and not any(p in cuerpo for p in ("error", "not author", "no autoriz", "invalid", "not found"))
+    # "spam": Telegram ha limitado el bot que llama; hay que añadirlo a tus contactos (callmebot.com/blog/spam-error)
+    ok = r.status_code == 200 and not any(
+        p in cuerpo for p in ("error", "not author", "no autoriz", "invalid", "not found", "spam", "please add"))
     if not ok:
         # Sin el usuario: el registro del robot es público
         log.warning("CallMeBot no hizo la llamada (HTTP %s): %s", r.status_code,
