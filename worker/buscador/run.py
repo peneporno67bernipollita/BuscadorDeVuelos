@@ -25,8 +25,8 @@ from datetime import date, datetime, timedelta, timezone
 
 from . import enlaces
 from .avisos import (
-    AYUDA, MENSAJE_PRUEBA, TEXTO_LLAMADA_PRUEBA, TIPOS_LLAMADA, Telegram, codigo_en_mensaje, eur, llamar,
-    mensaje_aviso, mensaje_estado, texto_llamada,
+    AYUDA, MENSAJE_PRUEBA, TIPOS_ALARMA, Telegram, alarma, codigo_en_mensaje, eur, mensaje_aviso, mensaje_estado,
+    texto_alarma,
 )
 from .db import Supabase
 from .decision import decidir, minutos_hasta_siguiente_revision
@@ -161,11 +161,7 @@ def atender_telegram(db: Supabase, tg: Telegram, perfiles: dict[str, dict], url_
         codigo = codigo_en_mensaje(texto)
         if codigo in codigos:
             perfil = codigos.pop(codigo)
-            cambios = {"telegram_chat_id": str(chat), "telegram_codigo": None}
-            usuario_tg = (mensaje.get("from") or {}).get("username")
-            if usuario_tg and "telegram_usuario" in perfil and not perfil.get("telegram_usuario"):
-                cambios["telegram_usuario"] = f"@{usuario_tg}"
-            db.actualizar("perfiles", {"id": f"eq.{perfil['id']}"}, cambios)
+            db.actualizar("perfiles", {"id": f"eq.{perfil['id']}"}, {"telegram_chat_id": str(chat), "telegram_codigo": None})
             perfil["telegram_chat_id"] = str(chat)
             por_chat[str(chat)] = perfil
             tg.enviar(chat, "✅ ¡Listo! Este chat queda vinculado a tu Buscador de Vuelos. Aquí te llegarán los avisos.\n\n" + AYUDA)
@@ -190,16 +186,15 @@ def atender_telegram(db: Supabase, tg: Telegram, perfiles: dict[str, dict], url_
             tg.enviar(p["telegram_chat_id"], MENSAJE_PRUEBA)
             db.actualizar("perfiles", {"id": f"eq.{p['id']}"}, {"telegram_prueba": False})
             p["telegram_prueba"] = False
-        if p.get("llamada_prueba"):
-            ok = llamar(p.get("telegram_usuario") or "", TEXTO_LLAMADA_PRUEBA)
-            db.actualizar("perfiles", {"id": f"eq.{p['id']}"}, {"llamada_prueba": False})
-            p["llamada_prueba"] = False
+        if p.get("alarma_prueba"):
+            ok = alarma(p.get("ntfy_tema") or "", "🔔 Prueba de alarma",
+                        "Así sonará tu móvil cuando haya un chollazo. Si no ha sonado fuerte, revisa los pasos de tu Perfil.",
+                        enlace=url_web)
+            db.actualizar("perfiles", {"id": f"eq.{p['id']}"}, {"alarma_prueba": False})
+            p["alarma_prueba"] = False
             if p.get("telegram_chat_id"):
-                tg.enviar(p["telegram_chat_id"], "📞 Llamada de prueba hecha: tu móvil debería haber sonado." if ok else (
-                    "📞 No se pudo hacer la llamada de prueba. Comprueba que tu usuario de Telegram está bien escrito en la web "
-                    "y que has autorizado a CallMeBot enviando /start a @CallMeBot_txtbot. Si CallMeBot te ha avisado de "
-                    "\"spam\", envía un mensaje a su bot de llamadas (@CallMeBot_API o @CallMeBot_API + número) y añádelo "
-                    "a tus contactos: https://www.callmebot.com/blog/spam-error/"))
+                tg.enviar(p["telegram_chat_id"], "🔔 Alarma de prueba enviada a la app ntfy." if ok else
+                          "🔔 No se pudo enviar la alarma de prueba (ntfy no respondió). Se reintentará si la pides otra vez.")
     return vinculados
 
 
@@ -313,8 +308,10 @@ def procesar_busqueda(
         )
         chat = (perfil or {}).get("telegram_chat_id")
         entregado = bool(tg and chat and tg.enviar(chat, texto))
-        if decision.tipo in TIPOS_LLAMADA and (perfil or {}).get("llamar_chollos") and (perfil or {}).get("telegram_usuario"):
-            llamar(perfil["telegram_usuario"], texto_llamada(decision.tipo, b, mejor.precio_total))
+        if decision.tipo in TIPOS_ALARMA and (perfil or {}).get("alarma_chollos") and (perfil or {}).get("ntfy_tema"):
+            alarma(perfil["ntfy_tema"], TIPOS_ALARMA[decision.tipo], texto_alarma(b, mejor.precio_total),
+                   enlace=f"{url_web.rstrip('/')}/#/busqueda/{b['id']}" if url_web else None,
+                   comprar=enlaces.comprar_ya(b, mejor))
         db.insertar("avisos", {
             "busqueda": b["id"], "usuario": b["usuario"], "tipo": decision.tipo, "motivo": decision.motivo,
             "precio_total": mejor.precio_total, "mensaje": texto, "entregado": entregado,

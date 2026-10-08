@@ -19,10 +19,10 @@ create table if not exists public.perfiles (
   telegram_chat_id text,
   telegram_codigo text,
   telegram_prueba boolean not null default false,
-  -- Llamada por Telegram (CallMeBot) en los chollazos
-  telegram_usuario text,
-  llamar_chollos boolean not null default false,
-  llamada_prueba boolean not null default false,
+  -- Alarma en el móvil (app ntfy) en los chollazos: canal secreto, interruptor y prueba
+  ntfy_tema text,
+  alarma_chollos boolean not null default false,
+  alarma_prueba boolean not null default false,
   perfil_completado boolean not null default false,
   creado timestamptz not null default now()
 );
@@ -386,16 +386,20 @@ end;
 $$;
 
 -- =====================================================================
--- Actualización v4: llamada por Telegram en los chollazos
+-- Actualización v5: alarma en el móvil con ntfy (sustituye a la llamada de CallMeBot de la v4)
 -- =====================================================================
-alter table public.perfiles add column if not exists telegram_usuario text;
-alter table public.perfiles add column if not exists llamar_chollos boolean not null default false;
-alter table public.perfiles add column if not exists llamada_prueba boolean not null default false;
+alter table public.perfiles drop constraint if exists perfiles_telegram_usuario_formato;
+alter table public.perfiles drop column if exists telegram_usuario;
+alter table public.perfiles drop column if exists llamar_chollos;
+alter table public.perfiles drop column if exists llamada_prueba;
+alter table public.perfiles add column if not exists ntfy_tema text;
+alter table public.perfiles add column if not exists alarma_chollos boolean not null default false;
+alter table public.perfiles add column if not exists alarma_prueba boolean not null default false;
 do $$
 begin
-  if not exists (select 1 from pg_constraint where conname = 'perfiles_telegram_usuario_formato') then
-    alter table public.perfiles add constraint perfiles_telegram_usuario_formato check (
-      telegram_usuario is null or telegram_usuario ~ '^(@[A-Za-z0-9_]{4,32}|\+[0-9]{6,15})$');
+  if not exists (select 1 from pg_constraint where conname = 'perfiles_ntfy_tema_formato') then
+    alter table public.perfiles add constraint perfiles_ntfy_tema_formato check (
+      ntfy_tema is null or ntfy_tema ~ '^[A-Za-z0-9_-]{16,64}$');
   end if;
 end;
 $$;

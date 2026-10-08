@@ -88,45 +88,41 @@ def test_vincular_con_codigo_y_responder_comandos():
     assert tg.enviados == []
 
 
-def test_llamadas_de_chollazos(monkeypatch):
-    llamadas = []
-    monkeypatch.setattr(run, "llamar", lambda usuario, texto: llamadas.append((usuario, texto)) or True)
-    # Al vincular se guarda el @usuario y la web puede pedir una llamada de prueba
+def test_alarma_de_prueba_desde_la_web(monkeypatch):
+    enviadas = []
+    monkeypatch.setattr(run, "alarma", lambda tema, titulo, texto, enlace=None: enviadas.append((tema, titulo)) or True)
     db = BaseDeDatosFalsa({
-        "perfiles": [{"id": "u1", "telegram_codigo": "ABCD2345", "telegram_chat_id": None, "telegram_usuario": None,
-                      "llamar_chollos": True, "llamada_prueba": False}],
+        "perfiles": [{"id": "u1", "telegram_chat_id": "99", "ntfy_tema": "vuelos-secreto123", "alarma_chollos": True,
+                      "alarma_prueba": True}],
         "ajustes": [],
     })
-    tg = TelegramFalso([{"update_id": 1, "message": {"chat": {"id": 99}, "from": {"username": "guille"}, "text": "/start ABCD2345"}}])
-    run.atender_telegram(db, tg, {p["id"]: p for p in db.leer("perfiles")}, None)
-    assert db.leer("perfiles")[0]["telegram_usuario"] == "@guille"
-    db.actualizar("perfiles", {"id": "eq.u1"}, {"llamada_prueba": True})
-    run.atender_telegram(db, TelegramFalso([]), {p["id"]: p for p in db.leer("perfiles")}, None)
-    assert llamadas and llamadas[0][0] == "@guille" and db.leer("perfiles")[0]["llamada_prueba"] is False
+    tg = TelegramFalso([])
+    run.atender_telegram(db, tg, {p["id"]: p for p in db.leer("perfiles")}, "https://web")
+    assert enviadas == [("vuelos-secreto123", "🔔 Prueba de alarma")]
+    assert db.leer("perfiles")[0]["alarma_prueba"] is False and "ntfy" in tg.enviados[0][1]
 
 
-def test_texto_y_parametros_de_la_llamada():
-    from buscador.avisos import llamar, texto_llamada
-
-    assert texto_llamada("bajada_fuerte", {"nombre": "Escapada a París"}, 70.0) == (
-        "Bajada fuerte de precio. Escapada a París: 70 euros en total. Mira Telegram para comprarlo.")
+def test_alarma_urgente_con_botones_de_compra():
+    from buscador.avisos import alarma, texto_alarma
 
     class Respuesta:
-        status_code, text = 200, "Call queued"
+        status_code = 200
 
     class Http:
-        def get(self, url, params, timeout):
-            self.url, self.params = url, params
+        def post(self, url, json, timeout):
+            self.url, self.datos = url, json
             return Respuesta()
 
     http = Http()
-    assert llamar("guille", "Escapada a París, así", http=http)
-    assert http.params["text"] == "Escapada a Paris, asi"  # sin tildes: con ellas falla la voz de CallMeBot
-    assert http.params["user"] == "@guille" and http.params["lang"].startswith("es-ES") and http.params["cc"] == "no"
-    Respuesta.text = "Error: user not authorized"
-    assert llamar("@guille", "hola", http=http) is False
-    Respuesta.text = "Someone reported CallMeBot as spammer, please add @CallMeBot_API16 in your Telegram contacts"
-    assert llamar("@guille", "hola", http=http) is False
+    comprar = [{"texto": "Comprar ya", "url": "https://www.google.com/travel/flights/booking?tfs=x"}]
+    assert alarma("vuelos-abc", "🔥 Chollo encontrado", texto_alarma({"nombre": "Escapada a París"}, 70.0),
+                  enlace="https://web/#/busqueda/1", comprar=comprar, http=http)
+    assert http.url == "https://ntfy.sh/" and http.datos["topic"] == "vuelos-abc" and http.datos["priority"] == 5
+    assert "70,00 €" in http.datos["message"] and http.datos["click"].endswith("/busqueda/1")
+    assert http.datos["actions"][0]["label"] == "Comprar ya"
+    assert alarma("", "x", "y", http=http) is False  # sin tema no se envía nada
+    Respuesta.status_code = 429
+    assert alarma("vuelos-abc", "x", "y", http=http) is False
 
 
 def test_mensaje_de_prueba_desde_la_web():

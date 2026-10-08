@@ -44,7 +44,7 @@ def main() -> None:
     )
     # Resultado visible al final: si salen 8 tablas y 77 aerolíneas, todo ha ido bien
     comprobacion = (
-        "\n-- Comprobación final (debe salir: 8 tablas, 77 aerolíneas, 3 webs, versión 2 = 1, versión 3 = 2, versión 4 = 3)\n"
+        "\n-- Comprobación final (debe salir: 8 tablas, 77 aerolíneas, 3 webs, versión 2 = 1, versión 3 = 2, versión 5 = 3)\n"
         "select 'Tablas creadas' as comprobacion, count(*) as total from information_schema.tables\n"
         "  where table_schema = 'public' and table_name in\n"
         "  ('perfiles','busquedas','precios','avisos','aerolineas','estado_fuentes','ejecuciones','ajustes')\n"
@@ -54,9 +54,9 @@ def main() -> None:
         "  where table_schema = 'public' and table_name = 'perfiles' and column_name = 'telegram_prueba'\n"
         "union all select 'Versión 3 instalada (varios aeropuertos)', count(*) from information_schema.columns\n"
         "  where table_schema = 'public' and table_name = 'busquedas' and column_name in ('origenes_extra', 'destinos_extra')\n"
-        "union all select 'Versión 4 instalada (llamadas en los chollos)', count(*) from information_schema.columns\n"
+        "union all select 'Versión 5 instalada (alarma en el móvil)', count(*) from information_schema.columns\n"
         "  where table_schema = 'public' and table_name = 'perfiles'\n"
-        "  and column_name in ('telegram_usuario', 'llamar_chollos', 'llamada_prueba');\n"
+        "  and column_name in ('ntfy_tema', 'alarma_chollos', 'alarma_prueba');\n"
     )
     SALIDA.write_text(ESQUEMA.read_text(encoding="utf-8") + semilla + comprobacion, encoding="utf-8")
     print(f"{SALIDA} generado con {len(aerolineas)} aerolíneas")

@@ -668,11 +668,13 @@ tbody tr.bloqueada td:not(:first-child) { opacity: .5; }
 .pasos li { counter-increment: paso; display: grid; grid-template-columns: 30px 1fr; gap: .8rem; align-items: start; }
 .pasos li::before { content: counter(paso); width: 30px; height: 30px; border-radius: 10px; display: grid; place-items: center; font-weight: 800; font-size: .85rem; background: var(--primario-suave); color: var(--primario); }
 
-.llamadas { margin-top: 1.1rem; padding-top: 1rem; border-top: 1px solid var(--borde); }
-.llamadas h3 { display: flex; align-items: center; gap: .5rem; margin: 0; }
-.llamadas h3 svg { width: 18px; height: 18px; color: var(--primario); }
-.llamadas p { margin: .6rem 0; }
-.llamadas .pasos { margin: .8rem 0; }
+.alarma-movil { margin-top: 1.1rem; padding-top: 1rem; border-top: 1px solid var(--borde); }
+.alarma-movil h3 { display: flex; align-items: center; gap: .5rem; margin: 0; }
+.alarma-movil h3 svg { width: 18px; height: 18px; color: var(--primario); }
+.alarma-movil p { margin: .6rem 0; }
+.alarma-movil .pasos { margin: .8rem 0; }
+.tema-ntfy { display: inline-block; font: 700 .92rem/1.3 "JetBrains Mono", ui-monospace, monospace; padding: .5rem .7rem; border-radius: 12px;
+  background: var(--superficie-2); border: 1.5px dashed var(--borde-fuerte); word-break: break-all; user-select: all; }
 
 /* Medidor */
 .medidor { height: 9px; border-radius: 99px; background: var(--superficie-3); overflow: hidden; }

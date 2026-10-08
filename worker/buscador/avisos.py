@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import html
 import logging
-import unicodedata
 
 import httpx
 
@@ -128,51 +127,41 @@ def mensaje_aviso(
     return unir_sin_pasarse(lineas)
 
 
-# Llamada de voz por Telegram para los chollazos (servicio externo gratuito: https://www.callmebot.com).
-# Solo se usa si lo activas en tu perfil; antes hay que autorizarlo una vez enviando /start a @CallMeBot_txtbot.
-CALLMEBOT_URL = "https://api.callmebot.com/start.php"
-VOZ_LLAMADA = "es-ES-Standard-A"
-TIPOS_LLAMADA = {
-    "bajada_fuerte": "Bajada fuerte de precio",
-    "chollo": "Chollo de vuelos",
-    "presupuesto": "Precio dentro de tu objetivo",
+# Alarma en el móvil para los chollazos con ntfy (app gratuita y de código abierto: https://ntfy.sh).
+# El robot publica en un "tema" secreto que solo conocen tu web y tu móvil (el nombre hace de contraseña).
+# Con prioridad máxima, en Android se le puede poner sonido de alarma y que se salte el "No molestar".
+NTFY_URL = "https://ntfy.sh/"
+TIPOS_ALARMA = {
+    "bajada_fuerte": "📉 Bajada fuerte de precio",
+    "chollo": "🔥 Chollo encontrado",
+    "presupuesto": "✅ Dentro de tu objetivo",
 }
-TEXTO_LLAMADA_PRUEBA = (
-    "Hola, soy tu Buscador de Vuelos. Esta es una llamada de prueba: así sonará el teléfono cuando encuentre un chollo."
-)
 
 
-def texto_llamada(tipo: str, b: dict, total: float) -> str:
-    precio = f"{total:.2f}".replace(".", ",").removesuffix(",00")
-    titulo = TIPOS_LLAMADA.get(tipo, "Aviso de vuelos")
-    return f"{titulo}. {b['nombre']}: {precio} euros en total. Mira Telegram para comprarlo."[:256]
-
-
-def llamar(usuario: str, texto: str, http=None) -> bool:
-    """Te llama por Telegram y una voz lee el texto. Devuelve True si CallMeBot aceptó la llamada."""
-    usuario = (usuario or "").strip()
-    if not usuario:
+def alarma(tema: str, titulo: str, texto: str, enlace: str | None = None,
+           comprar: list[dict] | None = None, http=None) -> bool:
+    """Notificación urgente en el móvil. Devuelve True si ntfy la aceptó."""
+    if not tema:
         return False
-    if not usuario.startswith(("@", "+")):
-        usuario = "@" + usuario
-    # La voz de CallMeBot falla con tildes ("Text to speech: Something went wrong"): se mandan sin ellas
-    sin_tildes = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode()
-    params = {"user": usuario, "text": sin_tildes[:256], "lang": VOZ_LLAMADA, "rpt": 2, "cc": "no"}
-    cliente = http or httpx
+    datos = {"topic": tema, "title": titulo[:200], "message": texto[:1000], "priority": 5,
+             "tags": ["airplane", "rotating_light"]}
+    if enlace:
+        datos["click"] = enlace
+    botones = [{"action": "view", "label": e["texto"], "url": e["url"], "clear": True} for e in (comprar or [])[:2]]
+    if botones:
+        datos["actions"] = botones
     try:
-        r = cliente.get(CALLMEBOT_URL, params=params, timeout=40)
+        r = (http or httpx).post(NTFY_URL, json=datos, timeout=20)
     except httpx.HTTPError as e:
-        log.warning("CallMeBot no responde: %s", type(e).__name__)
+        log.warning("ntfy no responde: %s", type(e).__name__)
         return False
-    cuerpo = r.text.lower()
-    # "spam": Telegram ha limitado el bot que llama; hay que añadirlo a tus contactos (callmebot.com/blog/spam-error)
-    ok = r.status_code == 200 and not any(
-        p in cuerpo for p in ("error", "not author", "no autoriz", "invalid", "not found", "spam", "please add"))
-    if not ok:
-        # Sin el usuario: el registro del robot es público
-        log.warning("CallMeBot no hizo la llamada (HTTP %s): %s", r.status_code,
-                    " ".join(r.text.replace(usuario, "@usuario").split())[:160])
-    return ok
+    if r.status_code != 200:
+        log.warning("ntfy no aceptó la alarma (HTTP %s)", r.status_code)  # sin el tema: el registro es público
+    return r.status_code == 200
+
+
+def texto_alarma(b: dict, total: float) -> str:
+    return f"{b['nombre']}: {eur(total)} en total. Toca para verlo o pulsa Comprar ya."
 
 
 LIMITE_TELEGRAM = 4000  # Telegram admite 4096 caracteres por mensaje
