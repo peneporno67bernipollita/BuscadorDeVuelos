@@ -149,3 +149,23 @@ async function crearReal() {
 
 export const api = modoDemo || !configurado ? crearDemo() : await crearReal();
 export const esDemo = modoDemo || !configurado;
+
+/**
+ * Alarma de prueba enviada directamente a ntfy desde el navegador (llega al instante: no espera al robot).
+ * En el modo demo no se envía nada.
+ */
+export async function enviarAlarmaPrueba(tema) {
+  if (esDemo) return;
+  const r = await fetch("https://ntfy.sh/", {
+    method: "POST",
+    body: JSON.stringify({
+      topic: tema,
+      title: "🔔 Prueba de alarma",
+      message: "Así sonará tu móvil cuando haya un chollazo (bajada fuerte, chollo o dentro de tu objetivo).",
+      priority: 5,
+      tags: ["airplane", "rotating_light"],
+      click: `${location.origin}${location.pathname}#/perfil`,
+    }),
+  });
+  if (!r.ok) throw new Error(`ntfy no aceptó la alarma (HTTP ${r.status})`);
+}

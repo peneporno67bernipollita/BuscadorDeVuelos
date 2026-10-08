@@ -1,4 +1,4 @@
-import { api, esDemo } from "../api.js";
+import { api, enviarAlarmaPrueba, esDemo } from "../api.js";
 import { BOT_TELEGRAM } from "../config.js";
 import { icono } from "../iconos.js";
 import { $, aviso, cadaSegundos, conCarga, confirmar, esc, generarCodigo, hace, limpiarPantalla } from "../util.js";
@@ -29,7 +29,7 @@ const TIENDAS_NTFY = {
 const nuevoTemaNtfy = () => `vuelos-${generarCodigo()}${generarCodigo()}`.toLowerCase();
 
 function notaAlarma() {
-  return `<div class="nota">${icono("reloj")}<span>Alarma de prueba pedida: si el robot está en marcha, te llegará en menos de un minuto.</span></div>`;
+  return `<div class="nota">${icono("reloj")}<span>Alarma de prueba pedida: el robot la enviará en cuanto termine lo que está buscando (unos minutos).</span></div>`;
 }
 
 /** Alarma en el móvil (app ntfy) para los chollazos. */
@@ -277,12 +277,21 @@ export async function vistaPerfil(app, primeraVez, alTerminar) {
   $("#probar-alarma")?.addEventListener("click", async (ev) => {
     const boton = ev.currentTarget;
     try {
-      Object.assign(perfil, await conCarga(boton, api.guardarPerfil({ alarma_prueba: true })));
-      boton.disabled = true;
-      $("#alarma-estado").innerHTML = notaAlarma();
-      aviso("Pedida: te llegará en un minuto");
-    } catch (e) {
-      aviso(e.message, "error");
+      // Directamente a ntfy: suena al momento
+      await conCarga(boton, enviarAlarmaPrueba(perfil.ntfy_tema));
+      $("#alarma-estado").innerHTML = `<div class="nota ok">${icono("campana")}<span>Alarma enviada: tu móvil debería estar sonando ya.
+        ¿No suena? Comprueba que en la app ntfy estás suscrito a este canal exacto y revisa el sonido de la prioridad máxima.</span></div>`;
+      aviso("Alarma enviada: debería sonar ahora mismo");
+    } catch {
+      // Si el navegador no puede, se la pide al robot (tarda un poco más)
+      try {
+        Object.assign(perfil, await conCarga(boton, api.guardarPerfil({ alarma_prueba: true })));
+        boton.disabled = true;
+        $("#alarma-estado").innerHTML = notaAlarma();
+        aviso("Pedida al robot: te llegará en unos minutos");
+      } catch (e) {
+        aviso(e.message, "error");
+      }
     }
   });
 
