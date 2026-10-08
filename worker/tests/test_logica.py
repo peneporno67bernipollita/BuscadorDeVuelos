@@ -171,3 +171,10 @@ def test_cabeceras_segun_tipo_de_clave():
     assert "authorization" not in nueva.http.headers  # las claves sb_ no son JWT
     antigua = Supabase("https://x.supabase.co", "eyJhbGciOi.antigua")
     assert antigua.http.headers["authorization"] == "Bearer eyJhbGciOi.antigua"
+
+
+def test_url_con_o_sin_rest_v1():
+    from buscador.db import Supabase
+
+    for url in ("https://x.supabase.co", "https://x.supabase.co/", "https://x.supabase.co/rest/v1/"):
+        assert Supabase(url, "sb_secret_abc").base == "https://x.supabase.co/rest/v1"

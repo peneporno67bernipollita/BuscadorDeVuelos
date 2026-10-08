@@ -7,7 +7,11 @@ import httpx
 
 class Supabase:
     def __init__(self, url: str, clave_servicio: str):
-        self.base = url.rstrip("/") + "/rest/v1"
+        # Acepta la URL del proyecto con o sin "/rest/v1" al final
+        base = url.strip().rstrip("/")
+        if base.endswith("/rest/v1"):
+            base = base[: -len("/rest/v1")]
+        self.base = base + "/rest/v1"
         cabeceras = {"apikey": clave_servicio, "Content-Type": "application/json"}
         # Las claves nuevas (sb_secret_...) no son JWT y solo van en "apikey";
         # la antigua service_role (JWT) también debe ir como Bearer.
