@@ -121,7 +121,7 @@ function crearDatos() {
     resumen: { revisadas: 1 + (i % 3 === 0), avisos: i === 7 ? 1 : 0, errores: [], fuentes_en_ronda: i % 3 ? ["google_flights"] : ["google_flights", "ryanair"] },
   }));
 
-  const perfil = { id: "demo", nombre: "Demo", familia_numerosa: "general", residente: "ninguno", telegram_chat_id: null, telegram_codigo: "K7PM4QXR", telegram_prueba: false, perfil_completado: true };
+  const perfil = { id: "demo", nombre: "Demo", familia_numerosa: "general", residente: "ninguno", telegram_chat_id: null, telegram_codigo: "K7PM4QXR", telegram_prueba: false, telegram_usuario: null, llamar_chollos: false, llamada_prueba: false, perfil_completado: true };
   return { busquedas, historial, opciones, avisos, aerolineas, fuentes, ejecuciones, perfil };
 }
 
@@ -174,6 +174,7 @@ export function crearDemo() {
     perfil: async () => copia(d.perfil),
     async guardarPerfil(campos) {
       Object.assign(d.perfil, campos);
+      if (campos.llamada_prueba) setTimeout(() => (d.perfil.llamada_prueba = false), 5000);
       return copia(d.perfil);
     },
     async pedirPruebaTelegram() {

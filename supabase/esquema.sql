@@ -19,6 +19,10 @@ create table if not exists public.perfiles (
   telegram_chat_id text,
   telegram_codigo text,
   telegram_prueba boolean not null default false,
+  -- Llamada por Telegram (CallMeBot) en los chollazos
+  telegram_usuario text,
+  llamar_chollos boolean not null default false,
+  llamada_prueba boolean not null default false,
   perfil_completado boolean not null default false,
   creado timestamptz not null default now()
 );
@@ -377,6 +381,21 @@ begin
     alter table public.busquedas add constraint busquedas_extras_max check (
       cardinality(origenes_extra) <= 3 and cardinality(destinos_extra) <= 3
     and array_to_string(origenes_extra || destinos_extra, ',') ~ '^([A-Z]{3}(,|$))*$');
+  end if;
+end;
+$$;
+
+-- =====================================================================
+-- Actualización v4: llamada por Telegram en los chollazos
+-- =====================================================================
+alter table public.perfiles add column if not exists telegram_usuario text;
+alter table public.perfiles add column if not exists llamar_chollos boolean not null default false;
+alter table public.perfiles add column if not exists llamada_prueba boolean not null default false;
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'perfiles_telegram_usuario_formato') then
+    alter table public.perfiles add constraint perfiles_telegram_usuario_formato check (
+      telegram_usuario is null or telegram_usuario ~ '^(@[A-Za-z0-9_]{4,32}|\+[0-9]{6,15})$');
   end if;
 end;
 $$;

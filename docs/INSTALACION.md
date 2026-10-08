@@ -24,8 +24,8 @@ Todo es gratis. Tardarás unos 30 minutos. Necesitas:
 4. Abre el archivo [`supabase/instalar.sql`](../supabase/instalar.sql) de este repositorio. Copia **todo** su contenido, pégalo y pulsa **Run**.
    Debe terminar con *Success*. Se puede volver a ejecutar sin problema; **hazlo tras cada actualización**
    (la versión 2 añade el tiempo real de la web, la señal de vida del robot y el mensaje de prueba de Telegram;
-   la versión 3, varios aeropuertos de salida y de llegada por búsqueda). La tabla final debe decir
-   "Versión 2 instalada" = 1 y "Versión 3 instalada" = 2.
+   la versión 3, varios aeropuertos de salida y de llegada por búsqueda; la versión 4, la llamada en los chollos).
+   La tabla final debe decir "Versión 2 instalada" = 1, "Versión 3 instalada" = 2 y "Versión 4 instalada" = 3.
 5. Apunta estos tres datos:
    - **Project URL** (en **Project Settings → Data API**): algo como `https://abcdxyz.supabase.co`.
    - **Publishable key** (en **Project Settings → API Keys**): empieza por `sb_publishable_`. Es pública y va en la web.
@@ -76,6 +76,10 @@ Solo se puede crear **una** cuenta: después el registro se cierra solo.
    - **Enviar mensaje de prueba** comprueba que los avisos te llegan.
    - **Volver a vincular** genera un código nuevo (por ejemplo, si cambias de móvil o algo falla).
    - En el chat puedes escribir `/estado` (resumen de tus búsquedas) o `/ayuda`.
+6. (Opcional) **Que te llame en los chollazos**: envía `/start` a **@CallMeBot_txtbot** (servicio gratuito externo que
+   hace la llamada), y en **Perfil → Llamada para los chollazos** pon tu usuario de Telegram, actívalo y pulsa
+   **Probar llamada**. Llama solo en bajadas fuertes, chollos y precios dentro de tu objetivo. En iPhone la llamada
+   suena pero a veces sin voz (fallo conocido de Telegram); el detalle llega siempre por mensaje.
 
 ## 6. Secretos del robot (GitHub)
 

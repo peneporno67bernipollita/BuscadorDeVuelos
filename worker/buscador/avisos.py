@@ -127,6 +127,49 @@ def mensaje_aviso(
     return unir_sin_pasarse(lineas)
 
 
+# Llamada de voz por Telegram para los chollazos (servicio externo gratuito: https://www.callmebot.com).
+# Solo se usa si lo activas en tu perfil; antes hay que autorizarlo una vez enviando /start a @CallMeBot_txtbot.
+CALLMEBOT_URL = "https://api.callmebot.com/start.php"
+VOZ_LLAMADA = "es-ES-Standard-A"
+TIPOS_LLAMADA = {
+    "bajada_fuerte": "Bajada fuerte de precio",
+    "chollo": "Chollo de vuelos",
+    "presupuesto": "Precio dentro de tu objetivo",
+}
+TEXTO_LLAMADA_PRUEBA = (
+    "Hola, soy tu Buscador de Vuelos. Esta es una llamada de prueba: así sonará el teléfono cuando encuentre un chollo."
+)
+
+
+def texto_llamada(tipo: str, b: dict, total: float) -> str:
+    precio = f"{total:.2f}".replace(".", ",").removesuffix(",00")
+    titulo = TIPOS_LLAMADA.get(tipo, "Aviso de vuelos")
+    return f"{titulo}. {b['nombre']}: {precio} euros en total. Mira Telegram para comprarlo."[:256]
+
+
+def llamar(usuario: str, texto: str, http=None) -> bool:
+    """Te llama por Telegram y una voz lee el texto. Devuelve True si CallMeBot aceptó la llamada."""
+    usuario = (usuario or "").strip()
+    if not usuario:
+        return False
+    if not usuario.startswith(("@", "+")):
+        usuario = "@" + usuario
+    params = {"user": usuario, "text": texto[:256], "lang": VOZ_LLAMADA, "rpt": 2, "cc": "no"}
+    cliente = http or httpx
+    try:
+        r = cliente.get(CALLMEBOT_URL, params=params, timeout=40)
+    except httpx.HTTPError as e:
+        log.warning("CallMeBot no responde: %s", type(e).__name__)
+        return False
+    cuerpo = r.text.lower()
+    ok = r.status_code == 200 and not any(p in cuerpo for p in ("error", "not author", "no autoriz", "invalid", "not found"))
+    if not ok:
+        # Sin el usuario: el registro del robot es público
+        log.warning("CallMeBot no hizo la llamada (HTTP %s): %s", r.status_code,
+                    " ".join(r.text.replace(usuario, "@usuario").split())[:160])
+    return ok
+
+
 LIMITE_TELEGRAM = 4000  # Telegram admite 4096 caracteres por mensaje
 
 

@@ -88,6 +88,44 @@ def test_vincular_con_codigo_y_responder_comandos():
     assert tg.enviados == []
 
 
+def test_llamadas_de_chollazos(monkeypatch):
+    llamadas = []
+    monkeypatch.setattr(run, "llamar", lambda usuario, texto: llamadas.append((usuario, texto)) or True)
+    # Al vincular se guarda el @usuario y la web puede pedir una llamada de prueba
+    db = BaseDeDatosFalsa({
+        "perfiles": [{"id": "u1", "telegram_codigo": "ABCD2345", "telegram_chat_id": None, "telegram_usuario": None,
+                      "llamar_chollos": True, "llamada_prueba": False}],
+        "ajustes": [],
+    })
+    tg = TelegramFalso([{"update_id": 1, "message": {"chat": {"id": 99}, "from": {"username": "guille"}, "text": "/start ABCD2345"}}])
+    run.atender_telegram(db, tg, {p["id"]: p for p in db.leer("perfiles")}, None)
+    assert db.leer("perfiles")[0]["telegram_usuario"] == "@guille"
+    db.actualizar("perfiles", {"id": "eq.u1"}, {"llamada_prueba": True})
+    run.atender_telegram(db, TelegramFalso([]), {p["id"]: p for p in db.leer("perfiles")}, None)
+    assert llamadas and llamadas[0][0] == "@guille" and db.leer("perfiles")[0]["llamada_prueba"] is False
+
+
+def test_texto_y_parametros_de_la_llamada():
+    from buscador.avisos import llamar, texto_llamada
+
+    assert texto_llamada("bajada_fuerte", {"nombre": "Escapada a París"}, 70.0) == (
+        "Bajada fuerte de precio. Escapada a París: 70 euros en total. Mira Telegram para comprarlo.")
+
+    class Respuesta:
+        status_code, text = 200, "Call queued"
+
+    class Http:
+        def get(self, url, params, timeout):
+            self.url, self.params = url, params
+            return Respuesta()
+
+    http = Http()
+    assert llamar("guille", "hola", http=http)
+    assert http.params["user"] == "@guille" and http.params["lang"].startswith("es-ES") and http.params["cc"] == "no"
+    Respuesta.text = "Error: user not authorized"
+    assert llamar("@guille", "hola", http=http) is False
+
+
 def test_mensaje_de_prueba_desde_la_web():
     db = BaseDeDatosFalsa({
         "perfiles": [{"id": "u1", "telegram_chat_id": "99", "telegram_prueba": True}],

@@ -24,7 +24,10 @@ from collections import Counter
 from datetime import date, datetime, timedelta, timezone
 
 from . import enlaces
-from .avisos import AYUDA, MENSAJE_PRUEBA, Telegram, codigo_en_mensaje, eur, mensaje_aviso, mensaje_estado
+from .avisos import (
+    AYUDA, MENSAJE_PRUEBA, TEXTO_LLAMADA_PRUEBA, TIPOS_LLAMADA, Telegram, codigo_en_mensaje, eur, llamar,
+    mensaje_aviso, mensaje_estado, texto_llamada,
+)
 from .db import Supabase
 from .decision import decidir, minutos_hasta_siguiente_revision
 from .filtros import Validador, franja
@@ -158,7 +161,11 @@ def atender_telegram(db: Supabase, tg: Telegram, perfiles: dict[str, dict], url_
         codigo = codigo_en_mensaje(texto)
         if codigo in codigos:
             perfil = codigos.pop(codigo)
-            db.actualizar("perfiles", {"id": f"eq.{perfil['id']}"}, {"telegram_chat_id": str(chat), "telegram_codigo": None})
+            cambios = {"telegram_chat_id": str(chat), "telegram_codigo": None}
+            usuario_tg = (mensaje.get("from") or {}).get("username")
+            if usuario_tg and "telegram_usuario" in perfil and not perfil.get("telegram_usuario"):
+                cambios["telegram_usuario"] = f"@{usuario_tg}"
+            db.actualizar("perfiles", {"id": f"eq.{perfil['id']}"}, cambios)
             perfil["telegram_chat_id"] = str(chat)
             por_chat[str(chat)] = perfil
             tg.enviar(chat, "✅ ¡Listo! Este chat queda vinculado a tu Buscador de Vuelos. Aquí te llegarán los avisos.\n\n" + AYUDA)
@@ -183,6 +190,14 @@ def atender_telegram(db: Supabase, tg: Telegram, perfiles: dict[str, dict], url_
             tg.enviar(p["telegram_chat_id"], MENSAJE_PRUEBA)
             db.actualizar("perfiles", {"id": f"eq.{p['id']}"}, {"telegram_prueba": False})
             p["telegram_prueba"] = False
+        if p.get("llamada_prueba"):
+            ok = llamar(p.get("telegram_usuario") or "", TEXTO_LLAMADA_PRUEBA)
+            db.actualizar("perfiles", {"id": f"eq.{p['id']}"}, {"llamada_prueba": False})
+            p["llamada_prueba"] = False
+            if p.get("telegram_chat_id"):
+                tg.enviar(p["telegram_chat_id"], "📞 Llamada de prueba hecha: tu móvil debería haber sonado." if ok else (
+                    "📞 No se pudo hacer la llamada de prueba. Comprueba que tu usuario de Telegram está bien escrito en la web "
+                    "y que has autorizado a CallMeBot enviando /start a @CallMeBot_txtbot."))
     return vinculados
 
 
@@ -296,6 +311,8 @@ def procesar_busqueda(
         )
         chat = (perfil or {}).get("telegram_chat_id")
         entregado = bool(tg and chat and tg.enviar(chat, texto))
+        if decision.tipo in TIPOS_LLAMADA and (perfil or {}).get("llamar_chollos") and (perfil or {}).get("telegram_usuario"):
+            llamar(perfil["telegram_usuario"], texto_llamada(decision.tipo, b, mejor.precio_total))
         db.insertar("avisos", {
             "busqueda": b["id"], "usuario": b["usuario"], "tipo": decision.tipo, "motivo": decision.motivo,
             "precio_total": mejor.precio_total, "mensaje": texto, "entregado": entregado,

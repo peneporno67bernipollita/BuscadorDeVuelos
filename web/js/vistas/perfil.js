@@ -21,6 +21,47 @@ function notaRobot(latido) {
         Arráncalo en GitHub → Actions → <b>Robot de vuelos</b> → <b>Run workflow</b>; al arrancar leerá tu mensaje.</span></div>`;
 }
 
+const USUARIO_TG = /^(@[A-Za-z0-9_]{4,32}|\+[0-9]{6,15})$/;
+
+function notaLlamada() {
+  return `<div class="nota">${icono("reloj")}<span>Llamada de prueba pedida: si el robot está en marcha, tu móvil sonará en menos de un minuto.</span></div>`;
+}
+
+/** Llamada por Telegram (CallMeBot) cuando hay un chollazo. */
+function bloqueLlamadas(perfil) {
+  if (!("llamar_chollos" in perfil)) {
+    return `
+      <div class="llamadas">
+        <h3>${icono("telefono")}Llamada para los chollazos</h3>
+        <div class="nota alerta">${icono("aviso")}<span>Para activarla falta actualizar la base de datos: en Supabase → SQL Editor
+          pega todo <code>supabase/instalar.sql</code> y pulsa Run.</span></div>
+      </div>`;
+  }
+  return `
+    <div class="llamadas">
+      <div class="fila entre">
+        <h3>${icono("telefono")}Llamada para los chollazos</h3>
+        <label class="interruptor"><input type="checkbox" id="llamar-chollos" ${perfil.llamar_chollos ? "checked" : ""}><span class="pista"></span>Activada</label>
+      </div>
+      <p class="suave pequeno">Si hay una <b>bajada fuerte</b>, un <b>chollo</b> o un precio <b>dentro de tu objetivo</b>, además del mensaje
+        te llama por Telegram una voz que te lo dice. Usa CallMeBot, un servicio externo gratuito: le llegan tu usuario de Telegram y el texto de la llamada.</p>
+      <ol class="pasos">
+        <li><span>Autoriza a CallMeBot una sola vez: abre <a href="https://t.me/CallMeBot_txtbot" target="_blank" rel="noopener">@CallMeBot_txtbot</a>
+          y pulsa <b>Iniciar</b>.</span></li>
+        <li><span>Tu usuario de Telegram (en Telegram: Ajustes → Nombre de usuario):
+          <input id="tg-usuario" value="${esc(perfil.telegram_usuario || "")}" placeholder="@tuusuario" autocomplete="off" spellcheck="false" style="margin-top:.4rem"></span></li>
+        <li><span>Pulsa <b>Probar llamada</b>: el móvil te sonará en un minuto.</span></li>
+      </ol>
+      <div id="llamada-estado">${perfil.llamada_prueba ? notaLlamada() : ""}</div>
+      <div class="fila" style="margin-top:.6rem">
+        <button id="guardar-llamadas">${icono("check")}Guardar</button>
+        <button class="primario" id="probar-llamada" ${perfil.llamada_prueba ? "disabled" : ""}>${icono("telefono")}Probar llamada</button>
+      </div>
+      <p class="pequeno tenue" style="margin-top:.7rem">En iPhone, Telegram tiene un fallo conocido: la llamada suena, pero a veces sin voz.
+        Lo importante es que suene; el detalle te llega siempre por mensaje.</p>
+    </div>`;
+}
+
 function tarjetaTelegram(perfil, latido) {
   if (perfil.telegram_chat_id) {
     return `
@@ -38,6 +79,7 @@ function tarjetaTelegram(perfil, latido) {
           <button class="fantasma pequeno peligro" id="revincular">${icono("intercambiar")}Volver a vincular (código nuevo)</button>
           <div class="ayuda">Úsalo si cambias de móvil o de cuenta de Telegram, o si los avisos no te llegan.</div>
         </div>
+        ${bloqueLlamadas(perfil)}
         ${notaRobot(latido)}
       </section>`;
   }
@@ -199,9 +241,56 @@ export async function vistaPerfil(app, primeraVez, alTerminar) {
     }
   });
 
-  // Mientras se espera la vinculación o el mensaje de prueba, se comprueba cada pocos segundos
+  // --- Llamada en los chollazos
+  const leerUsuario = () => {
+    let u = ($("#tg-usuario")?.value || "").trim().replace(/^https?:\/\/t\.me\//i, "");
+    if (u && !u.startsWith("@") && !u.startsWith("+")) u = `@${u}`;
+    return u;
+  };
+  const guardarLlamadas = async (boton, extra = {}) => {
+    const usuario = leerUsuario();
+    const activar = $("#llamar-chollos").checked;
+    if ((activar || extra.llamada_prueba) && !USUARIO_TG.test(usuario)) {
+      throw new Error("Escribe tu usuario de Telegram, por ejemplo @guille_92 (en Telegram: Ajustes → Nombre de usuario).");
+    }
+    const nuevo = await conCarga(boton, api.guardarPerfil({ telegram_usuario: usuario || null, llamar_chollos: activar, ...extra }));
+    Object.assign(perfil, nuevo);
+    $("#tg-usuario").value = perfil.telegram_usuario || "";
+  };
+  $("#guardar-llamadas")?.addEventListener("click", async (ev) => {
+    const boton = ev.currentTarget;
+    try {
+      await guardarLlamadas(boton);
+      aviso(perfil.llamar_chollos ? "Listo: te llamaré cuando haya un chollazo" : "Guardado (llamadas desactivadas)");
+    } catch (e) {
+      aviso(e.message, "error");
+    }
+  });
+  $("#llamar-chollos")?.addEventListener("change", async (ev) => {
+    const caja = ev.currentTarget;
+    try {
+      await guardarLlamadas(null);
+      aviso(caja.checked ? "Llamadas activadas para los chollazos" : "Llamadas desactivadas");
+    } catch (e) {
+      caja.checked = !caja.checked;
+      aviso(e.message, "error");
+    }
+  });
+  $("#probar-llamada")?.addEventListener("click", async (ev) => {
+    const boton = ev.currentTarget;
+    try {
+      await guardarLlamadas(boton, { llamada_prueba: true });
+      boton.disabled = true;
+      $("#llamada-estado").innerHTML = notaLlamada();
+      aviso("Pedida: el móvil sonará en un minuto");
+    } catch (e) {
+      aviso(e.message, "error");
+    }
+  });
+
+  // Mientras se espera la vinculación, el mensaje o la llamada de prueba, se comprueba cada pocos segundos
   cadaSegundos(esDemo ? 3 : 6, async () => {
-    if (perfil.telegram_chat_id && !perfil.telegram_prueba) return;
+    if (perfil.telegram_chat_id && !perfil.telegram_prueba && !perfil.llamada_prueba) return;
     let ahora;
     try {
       ahora = await api.perfil();
@@ -215,6 +304,13 @@ export async function vistaPerfil(app, primeraVez, alTerminar) {
       perfil.telegram_prueba = false;
       $("#prueba-estado").innerHTML = `<div class="nota ok">${icono("check")}<span>Mensaje de prueba enviado: debería estar ya en tu Telegram.</span></div>`;
       const boton = $("#probar");
+      if (boton) boton.disabled = false;
+    }
+    if (perfil.llamada_prueba && !ahora.llamada_prueba) {
+      perfil.llamada_prueba = false;
+      $("#llamada-estado").innerHTML = `<div class="nota ok">${icono("telefono")}<span>Llamada de prueba hecha. ¿No ha sonado? El bot te ha escrito
+        el motivo en Telegram (normalmente falta autorizar a @CallMeBot_txtbot o el usuario está mal escrito).</span></div>`;
+      const boton = $("#probar-llamada");
       if (boton) boton.disabled = false;
     }
   });

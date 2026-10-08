@@ -19,6 +19,10 @@ create table if not exists public.perfiles (
   telegram_chat_id text,
   telegram_codigo text,
   telegram_prueba boolean not null default false,
+  -- Llamada por Telegram (CallMeBot) en los chollazos
+  telegram_usuario text,
+  llamar_chollos boolean not null default false,
+  llamada_prueba boolean not null default false,
   perfil_completado boolean not null default false,
   creado timestamptz not null default now()
 );
@@ -381,6 +385,21 @@ begin
 end;
 $$;
 
+-- =====================================================================
+-- Actualización v4: llamada por Telegram en los chollazos
+-- =====================================================================
+alter table public.perfiles add column if not exists telegram_usuario text;
+alter table public.perfiles add column if not exists llamar_chollos boolean not null default false;
+alter table public.perfiles add column if not exists llamada_prueba boolean not null default false;
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'perfiles_telegram_usuario_formato') then
+    alter table public.perfiles add constraint perfiles_telegram_usuario_formato check (
+      telegram_usuario is null or telegram_usuario ~ '^(@[A-Za-z0-9_]{4,32}|\+[0-9]{6,15})$');
+  end if;
+end;
+$$;
+
 -- Que la API de Supabase vea al momento las columnas nuevas
 notify pgrst, 'reload schema';
 
@@ -467,7 +486,7 @@ insert into public.aerolineas (codigo, nombre, permitida, criterio, web_oficial,
   ('H2', 'SKY Airline', true, 'AirlineRatings 2026: top 25 low cost (nº25)', 'https://www.skyairline.com', 50, 80, 80, 80, 'tramo', null, 'La tarifa básica solo incluye un bolso pequeño; maletas = máximo publicado (estimación).')
 on conflict (codigo) do nothing;
 
--- Comprobación final (debe salir: 8 tablas, 77 aerolíneas, 3 webs, versión 2 = 1, versión 3 = 2)
+-- Comprobación final (debe salir: 8 tablas, 77 aerolíneas, 3 webs, versión 2 = 1, versión 3 = 2, versión 4 = 3)
 select 'Tablas creadas' as comprobacion, count(*) as total from information_schema.tables
   where table_schema = 'public' and table_name in
   ('perfiles','busquedas','precios','avisos','aerolineas','estado_fuentes','ejecuciones','ajustes')
@@ -476,4 +495,7 @@ union all select 'Webs configuradas', count(*) from public.estado_fuentes
 union all select 'Versión 2 instalada (tiempo real y Telegram)', count(*) from information_schema.columns
   where table_schema = 'public' and table_name = 'perfiles' and column_name = 'telegram_prueba'
 union all select 'Versión 3 instalada (varios aeropuertos)', count(*) from information_schema.columns
-  where table_schema = 'public' and table_name = 'busquedas' and column_name in ('origenes_extra', 'destinos_extra');
+  where table_schema = 'public' and table_name = 'busquedas' and column_name in ('origenes_extra', 'destinos_extra')
+union all select 'Versión 4 instalada (llamadas en los chollos)', count(*) from information_schema.columns
+  where table_schema = 'public' and table_name = 'perfiles'
+  and column_name in ('telegram_usuario', 'llamar_chollos', 'llamada_prueba');
