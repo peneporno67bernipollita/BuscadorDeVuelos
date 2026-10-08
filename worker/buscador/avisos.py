@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 import logging
+import unicodedata
 
 import httpx
 
@@ -154,7 +155,9 @@ def llamar(usuario: str, texto: str, http=None) -> bool:
         return False
     if not usuario.startswith(("@", "+")):
         usuario = "@" + usuario
-    params = {"user": usuario, "text": texto[:256], "lang": VOZ_LLAMADA, "rpt": 2, "cc": "no"}
+    # La voz de CallMeBot falla con tildes ("Text to speech: Something went wrong"): se mandan sin ellas
+    sin_tildes = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode()
+    params = {"user": usuario, "text": sin_tildes[:256], "lang": VOZ_LLAMADA, "rpt": 2, "cc": "no"}
     cliente = http or httpx
     try:
         r = cliente.get(CALLMEBOT_URL, params=params, timeout=40)

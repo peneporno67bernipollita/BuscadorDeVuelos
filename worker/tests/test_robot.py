@@ -120,7 +120,8 @@ def test_texto_y_parametros_de_la_llamada():
             return Respuesta()
 
     http = Http()
-    assert llamar("guille", "hola", http=http)
+    assert llamar("guille", "Escapada a París, así", http=http)
+    assert http.params["text"] == "Escapada a Paris, asi"  # sin tildes: con ellas falla la voz de CallMeBot
     assert http.params["user"] == "@guille" and http.params["lang"].startswith("es-ES") and http.params["cc"] == "no"
     Respuesta.text = "Error: user not authorized"
     assert llamar("@guille", "hola", http=http) is False
