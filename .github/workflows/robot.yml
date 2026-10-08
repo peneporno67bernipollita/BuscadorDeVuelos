@@ -8,9 +8,9 @@ on:
   workflow_dispatch:
     inputs:
       forzar:
-        description: "Ignorar intervalos (solo para pruebas; los bloqueos se respetan siempre)"
+        description: "Forzar: revisar ya todas las búsquedas (ignora los intervalos; los bloqueos se respetan siempre)"
         type: boolean
-        default: false
+        default: true
 
 # Nunca dos rondas a la vez
 concurrency:
