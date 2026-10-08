@@ -161,7 +161,10 @@ export async function vistaPerfil(app, primeraVez, alTerminar) {
 
   // --- Telegram
   const nuevoCodigo = async (boton) => {
-    await conCarga(boton, api.guardarPerfil({ telegram_chat_id: null, telegram_codigo: generarCodigo(), telegram_prueba: false }));
+    const campos = { telegram_chat_id: null, telegram_codigo: generarCodigo() };
+    // telegram_prueba solo existe si la base de datos ya está actualizada (instalar.sql v2)
+    if ("telegram_prueba" in perfil) campos.telegram_prueba = false;
+    await conCarga(boton, api.guardarPerfil(campos));
     aviso("Código nuevo listo: pulsa «Abrir Telegram y vincular»");
     repintar();
   };

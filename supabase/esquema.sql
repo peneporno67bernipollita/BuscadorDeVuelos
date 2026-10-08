@@ -359,3 +359,6 @@ begin
   end if;
 end;
 $$;
+
+-- Que la API de Supabase vea al momento las columnas nuevas
+notify pgrst, 'reload schema';

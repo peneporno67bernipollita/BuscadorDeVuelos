@@ -360,6 +360,9 @@ begin
 end;
 $$;
 
+-- Que la API de Supabase vea al momento las columnas nuevas
+notify pgrst, 'reload schema';
+
 -- =====================================================================
 -- Lista blanca inicial de aerolíneas (ver docs/INVESTIGACION.md)
 -- =====================================================================
@@ -443,9 +446,11 @@ insert into public.aerolineas (codigo, nombre, permitida, criterio, web_oficial,
   ('H2', 'SKY Airline', true, 'AirlineRatings 2026: top 25 low cost (nº25)', 'https://www.skyairline.com', 50, 80, 80, 80, 'tramo', null, 'La tarifa básica solo incluye un bolso pequeño; maletas = máximo publicado (estimación).')
 on conflict (codigo) do nothing;
 
--- Comprobación final (debe salir: 8 tablas, 77 aerolíneas, 3 webs)
+-- Comprobación final (debe salir: 8 tablas, 77 aerolíneas, 3 webs, versión 2 = 1)
 select 'Tablas creadas' as comprobacion, count(*) as total from information_schema.tables
   where table_schema = 'public' and table_name in
   ('perfiles','busquedas','precios','avisos','aerolineas','estado_fuentes','ejecuciones','ajustes')
 union all select 'Aerolíneas en la lista blanca', count(*) from public.aerolineas
-union all select 'Webs configuradas', count(*) from public.estado_fuentes;
+union all select 'Webs configuradas', count(*) from public.estado_fuentes
+union all select 'Versión 2 instalada (tiempo real y Telegram)', count(*) from information_schema.columns
+  where table_schema = 'public' and table_name = 'perfiles' and column_name = 'telegram_prueba';

@@ -13,7 +13,7 @@ const ERRORES = [
   [/password should be at least/i, "La contraseña debe tener al menos 6 caracteres."],
   [/rate limit/i, "Demasiados intentos seguidos. Espera unos minutos."],
   [/violates check constraint/i, "Algún dato no es válido. Revisa el formulario."],
-  [/telegram_prueba/i, "Falta actualizar la base de datos: ejecuta de nuevo supabase/instalar.sql en Supabase."],
+  [/telegram_prueba/i, "Falta actualizar la base de datos: en Supabase → SQL Editor pega todo supabase/instalar.sql y pulsa Run."],
   [/failed to fetch|network/i, "No hay conexión con la base de datos. Revisa tu internet."],
 ];
 
