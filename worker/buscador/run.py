@@ -164,7 +164,7 @@ def procesar_busqueda(
         if decision.tipo in ("final", "sin_presupuesto", "proximo"):
             cambios["aviso_final_enviado"] = True
         avisado = True
-        log.info("Aviso '%s' para %s: %s", decision.tipo, b["nombre"], eur(mejor.precio_total))
+        log.info("Aviso '%s' enviado (búsqueda %s…)", decision.tipo, b["id"][:8])
 
     db.actualizar("busquedas", {"id": f"eq.{b['id']}"}, cambios)
     return avisado
@@ -172,6 +172,8 @@ def procesar_busqueda(
 
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    # httpx registra cada URL pedida (rutas, fechas...): no debe aparecer en registros públicos
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     url, clave = os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_SERVICE_KEY")
     if not url or not clave:
         # Sin configurar todavía: se avisa en el registro pero no se marca como fallo
@@ -263,17 +265,22 @@ def main() -> int:
                         resumen["avisos"] += 1
                     resumen["revisadas"] += 1
                 except Exception as e:
-                    log.exception("Error procesando %s", b.get("nombre"))
+                    log.error("Error procesando la búsqueda %s…: %s", b["id"][:8], type(e).__name__)
                     resumen["errores"].append(f"{b.get('nombre')}: {type(e).__name__}: {e}"[:300])
     except Exception as e:
-        log.exception("Fallo general de la ronda")
+        log.error("Fallo general de la ronda: %s", type(e).__name__)
         resumen["errores"].append(f"Fallo general: {type(e).__name__}: {e}"[:500])
         codigo_salida = 1
     finally:
         duracion = int(time.monotonic() - t0)
         db.actualizar("ejecuciones", {"id": f"eq.{ejecucion['id']}"},
                       {"fin": datetime.now(timezone.utc).isoformat(), "duracion_s": duracion, "resumen": resumen})
-        log.info("Ronda terminada en %s s: %s", duracion, resumen)
+        # Solo números en el registro: si el repositorio es público, cualquiera puede leerlo.
+        # El detalle (con nombres de búsquedas y errores) se guarda en Supabase, que es privado.
+        log.info(
+            "Ronda terminada en %s s: %s revisadas, %s avisos, %s incidencias",
+            duracion, resumen.get("revisadas", 0), resumen.get("avisos", 0), len(resumen.get("errores", [])),
+        )
     return codigo_salida
 
 

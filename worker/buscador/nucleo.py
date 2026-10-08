@@ -62,7 +62,7 @@ def consultar(
                 est["bloqueo"] = str(e)
                 break
             except Exception as e:  # un fallo en una búsqueda no detiene las demás
-                log.exception("Error en %s con la búsqueda %s", nombre, b.get("nombre"))
+                log.error("Error en %s con la búsqueda %s…: %s", nombre, b["id"][:8], type(e).__name__)
                 r = ResultadoFuente(error=f"{type(e).__name__}: {e}"[:300])
                 est["errores"].append(r.error)
             resultados[b["id"]][nombre] = r
