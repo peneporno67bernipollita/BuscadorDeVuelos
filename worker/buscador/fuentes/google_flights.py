@@ -275,33 +275,38 @@ class GoogleFlights:
             opciones += self._ida_y_vuelta(b, fecha_ida, fecha_vuelta)
 
         # Billetes de solo ida (y vuelta por separado): en low cost suele salir más barato
-        mejor = {}
+        validos: dict[str, list[tuple[float, object]]] = {}
         for sentido, fecha in (("ida", fecha_ida), ("vuelta", fecha_vuelta)):
             if fecha is None:
                 continue
-            validos = []
+            validos[sentido] = []
             for r in self._solo_ida(b, sentido, fecha):
                 if r.price is None or r.self_transfer:
                     continue
                 tr = _a_trayecto(r)
                 if validador.sentido(tr, sentido) is None:
-                    validos.append((float(r.price), tr))
-            if not validos:
-                mejor = {}
-                break
-            mejor[sentido] = min(validos, key=lambda x: x[0])
-        if "ida" in mejor and (fecha_vuelta is None or "vuelta" in mejor):
-            precio_ida, tr_ida = mejor["ida"]
-            precio_vuelta, tr_vuelta = mejor.get("vuelta", (0.0, None))
-            opciones.append(
-                Opcion(
-                    fuente=self.nombre,
-                    ida=tr_ida,
-                    vuelta=tr_vuelta,
-                    precio_billetes=precio_ida + precio_vuelta,
-                    billetes_separados=tr_vuelta is not None,
-                )
-            )
+                    validos[sentido].append((float(r.price), tr))
+        idas, vueltas = validos.get("ida", []), validos.get("vuelta")
+        if idas and fecha_vuelta is None:
+            precio, tr = min(idas, key=lambda x: x[0])
+            opciones.append(Opcion(fuente=self.nombre, ida=tr, vuelta=None, precio_billetes=precio))
+        elif idas and vueltas:
+            # Con varios aeropuertos de salida: lo más barato volviendo al mismo del que sales (para cada uno)
+            # y, si sale más barato, volviendo a otro (la web y el aviso lo indican)
+            pares = []
+            for salida in dict.fromkeys(tr.origen for _, tr in idas):
+                ida_aqui = [x for x in idas if x[1].origen == salida]
+                vuelta_aqui = [x for x in vueltas if x[1].destino == salida]
+                if vuelta_aqui:
+                    pares.append((min(ida_aqui, key=lambda x: x[0]), min(vuelta_aqui, key=lambda x: x[0])))
+            pares.append((min(idas, key=lambda x: x[0]), min(vueltas, key=lambda x: x[0])))
+            vistos = set()
+            for (precio_ida, tr_ida), (precio_vuelta, tr_vuelta) in pares:
+                if (id(tr_ida), id(tr_vuelta)) in vistos:
+                    continue
+                vistos.add((id(tr_ida), id(tr_vuelta)))
+                opciones.append(Opcion(fuente=self.nombre, ida=tr_ida, vuelta=tr_vuelta,
+                                       precio_billetes=precio_ida + precio_vuelta, billetes_separados=True))
 
         if not opciones and self._tiene_franjas(b):
             # Google filtra por horario y devuelve una lista vacía sin más. Se repite sin franjas y el

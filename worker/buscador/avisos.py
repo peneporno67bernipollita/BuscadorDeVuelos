@@ -55,7 +55,7 @@ def _linea_trayecto(etiqueta: str, tr: Trayecto, aerolineas: dict[str, dict]) ->
 
 
 def ruta_txt(b: dict) -> str:
-    """"Sevilla (SVQ) o Jerez (XRY) → París Orly (ORY)"."""
+    """"Jerez (XRY) o Sevilla (SVQ) → París Charles de Gaulle (CDG)"."""
     origenes, destinos = aeropuertos_busqueda(b)
     return " o ".join(map(aeropuertos.nombre, origenes)) + " → " + " o ".join(map(aeropuertos.nombre, destinos))
 
@@ -83,6 +83,7 @@ def mensaje_aviso(
     aerolineas: dict[str, dict],
     url_web: str | None,
     comprar: list[dict] | None = None,
+    mismo_aeropuerto: Opcion | None = None,
 ) -> str:
     ruta = ruta_txt(b)
     lineas = [
@@ -109,6 +110,13 @@ def mensaje_aviso(
     if extra:
         lineas.append("📊 " + " · ".join(extra))
     lineas += ["", f"ℹ️ {_e(decision.motivo)}"]
+    if op.vuelta_a_otro_aeropuerto:
+        aviso = (f"🔁 <b>Ojo: vuelves a {_e(aeropuertos.nombre(op.vuelta.destino))}</b>, no a "
+                 f"{_e(aeropuertos.nombre(op.ida.origen))}, de donde sales: así sale más barato.")
+        if mismo_aeropuerto is not None and mismo_aeropuerto is not op:
+            aviso += (f" Volviendo a {_e(aeropuertos.nombre(mismo_aeropuerto.ida.origen))} costaría "
+                      f"{eur(mismo_aeropuerto.precio_total)} (+{eur(mismo_aeropuerto.precio_total - op.precio_total)}).")
+        lineas.append(aviso)
     if op.billetes_separados:
         lineas.append("⚠️ Ida y vuelta son billetes separados: tienes que comprar los dos.")
     for nota in op.notas:

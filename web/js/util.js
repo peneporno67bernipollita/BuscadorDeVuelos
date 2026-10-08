@@ -146,7 +146,7 @@ export function aeropuertosDe(b) {
   const unicos = (lista) => [...new Set(lista.filter(Boolean))];
   return {
     origenes: unicos([b.origen, ...(b.origenes_extra || [])]),
-    destinos: unicos([b.destino, ...(b.destinos_extra || [])]),
+    destinos: [b.destino], // la llegada es siempre una (solo puede haber varias salidas)
   };
 }
 

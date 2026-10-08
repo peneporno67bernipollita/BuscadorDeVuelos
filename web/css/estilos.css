@@ -579,6 +579,23 @@ input[type="date"] { min-height: 46px; }
 .fila-compra .veredicto { margin: 0; }
 .fila-compra .acciones:empty { display: none; }
 
+.fila-salida {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto; grid-template-areas: "salida flecha llegada quitar";
+  gap: .6rem; align-items: start; margin-top: .6rem; padding: .7rem .8rem .2rem; border-radius: 14px;
+  background: var(--superficie-2); border: 1px solid var(--borde); animation: entrar .35s var(--curva) both;
+}
+.fila-salida .salida-alt { grid-area: salida; margin-bottom: .4rem; }
+.fila-salida .llegada-alt { grid-area: llegada; margin-bottom: .4rem; }
+.fila-salida .flecha-salida { grid-area: flecha; margin-top: 2.25rem; color: var(--tenue); }
+.fila-salida .quitar-fila { grid-area: quitar; margin-top: 1.75rem; }
+.llegada-fija { display: flex; align-items: center; gap: .5rem; min-height: 46px; padding: .7rem .85rem; border-radius: 12px;
+  border: 1px dashed var(--borde-fuerte); color: var(--suave); font-weight: 650; }
+.llegada-fija svg { width: 17px; height: 17px; color: var(--primario); }
+@media (max-width: 640px) {
+  .fila-salida { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "salida quitar" "llegada llegada"; }
+  .fila-salida .flecha-salida { display: none; }
+}
+
 .resumen-lateral { position: sticky; top: 1.5rem; }
 .resumen-lateral ul { list-style: none; padding: 0; margin: 0 0 1rem; display: flex; flex-direction: column; gap: .7rem; }
 .resumen-lateral li { display: flex; gap: .65rem; font-size: .88rem; }

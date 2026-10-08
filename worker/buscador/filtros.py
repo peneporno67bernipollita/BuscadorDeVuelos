@@ -11,11 +11,12 @@ MAX_AEROPUERTOS = 4  # por lado (el principal y hasta 3 alternativos)
 
 
 def aeropuertos_busqueda(busqueda: dict) -> tuple[list[str], list[str]]:
-    """Aeropuertos de salida y de llegada: el principal y los alternativos que añadas en la web
-    (p. ej. Sevilla o Jerez). Cualquiera de los de salida vale para volver."""
+    """Aeropuertos de salida (el principal y los alternativos que añadas en la web, p. ej. Jerez o Sevilla)
+    y el de llegada, que es siempre uno. La vuelta llega a cualquiera de los de salida: lo ideal es el mismo
+    del que sales, pero si volver al otro sale más barato también se busca (y se indica)."""
     origenes = [busqueda["origen"], *(busqueda.get("origenes_extra") or [])]
-    destinos = [busqueda["destino"], *(busqueda.get("destinos_extra") or [])]
-    return list(dict.fromkeys(origenes))[:MAX_AEROPUERTOS], list(dict.fromkeys(destinos))[:MAX_AEROPUERTOS]
+    origenes = [c for c in dict.fromkeys(origenes) if c != busqueda["destino"]]
+    return origenes[:MAX_AEROPUERTOS], [busqueda["destino"]]
 
 
 def _lista(codigos: str | Collection[str]) -> list[str]:

@@ -231,21 +231,46 @@ def test_muestras_y_calendario_acumulado_del_chollo():
 
 # ---------------- versión 3: varios aeropuertos, bajada fuerte, comprar ya ----------------
 
-def test_varios_aeropuertos_de_salida_y_llegada():
-    b = busqueda(origenes_extra=["XRY"], destinos_extra=["CDG"])
+def test_varios_aeropuertos_de_salida_y_una_sola_llegada():
+    b = busqueda(origenes_extra=["XRY"], destinos_extra=["CDG"])  # la llegada extra (versiones antiguas) se ignora
     v = Validador(b, AEROLINEAS)
-    desde_jerez = Opcion("p", Trayecto([tramo("FR", "XRY", "CDG", IDA)]), Trayecto([tramo("FR", "ORY", "SVQ", VUELTA)]), 90)
-    assert v.opcion(desde_jerez) is None  # sale de Jerez, llega a CDG y vuelve de Orly a Sevilla: todo vale
-    desde_madrid = Opcion("p", Trayecto([tramo("FR", "MAD", "ORY", IDA)]), Trayecto([tramo("FR", "ORY", "SVQ", VUELTA)]), 90)
+    jerez_y_vuelta_a_jerez = Opcion("p", Trayecto([tramo("FR", "XRY", "ORY", IDA)]), Trayecto([tramo("FR", "ORY", "XRY", VUELTA)]), 90)
+    jerez_y_vuelta_a_sevilla = Opcion("p", Trayecto([tramo("FR", "XRY", "ORY", IDA)]), Trayecto([tramo("FR", "ORY", "SVQ", VUELTA)]), 80)
+    a_cdg = Opcion("p", Trayecto([tramo("FR", "XRY", "CDG", IDA)]), Trayecto([tramo("FR", "CDG", "XRY", VUELTA)]), 70)
+    desde_madrid = Opcion("p", Trayecto([tramo("FR", "MAD", "ORY", IDA)]), Trayecto([tramo("FR", "ORY", "SVQ", VUELTA)]), 60)
+    assert v.opcion(jerez_y_vuelta_a_jerez) is None and not jerez_y_vuelta_a_jerez.vuelta_a_otro_aeropuerto
+    assert v.opcion(jerez_y_vuelta_a_sevilla) is None and jerez_y_vuelta_a_sevilla.vuelta_a_otro_aeropuerto
+    assert "CDG" in v.opcion(a_cdg)  # solo vale la llegada elegida
     assert "MAD" in v.opcion(desde_madrid) and "SVQ / XRY" in v.opcion(desde_madrid)
-    sin_extras = Validador(busqueda(), AEROLINEAS)
-    assert sin_extras.opcion(desde_jerez) is not None  # sin aeropuertos extra, solo vale el exacto
+    assert Validador(busqueda(), AEROLINEAS).opcion(jerez_y_vuelta_a_jerez) is not None  # sin extras, solo el exacto
+
+
+def test_se_guarda_siempre_la_que_vuelve_al_mismo_aeropuerto():
+    from buscador.run import opciones_a_guardar
+    otro = [Opcion("p", Trayecto([tramo("FR", "XRY", "ORY", IDA)]), Trayecto([tramo("FR", "ORY", "SVQ", VUELTA)]), 80 + i)
+            for i in range(6)]
+    mismo = Opcion("p", Trayecto([tramo("FR", "XRY", "ORY", IDA)]), Trayecto([tramo("FR", "ORY", "XRY", VUELTA)]), 99)
+    elegidas = opciones_a_guardar(otro + [mismo], n=5)
+    assert len(elegidas) == 5 and elegidas[0] is otro[0] and elegidas[-1] is mismo
+
+
+def test_aviso_indica_que_vuelves_a_otro_aeropuerto():
+    from buscador.avisos import mensaje_aviso
+    from buscador.decision import Decision
+    b = busqueda(origenes_extra=["XRY"])
+    barato = Opcion("p", Trayecto([tramo("FR", "XRY", "ORY", IDA)]), Trayecto([tramo("FR", "ORY", "SVQ", VUELTA)]), 80)
+    barato.precio_total = 80
+    mismo = Opcion("p", Trayecto([tramo("FR", "XRY", "ORY", IDA)]), Trayecto([tramo("FR", "ORY", "XRY", VUELTA)]), 95)
+    mismo.precio_total = 95
+    texto = mensaje_aviso(b, barato, Decision(True, "chollo", "t", "m"), [], "https://g", AEROLINEAS, None,
+                          mismo_aeropuerto=mismo)
+    assert "vuelves a" in texto and "SVQ" in texto and "95,00 €" in texto and "+15,00 €" in texto
 
 
 def test_ruta_con_varios_aeropuertos_en_los_mensajes():
     from buscador.avisos import ruta_txt
-    texto = ruta_txt(busqueda(origenes_extra=["XRY", "SVQ"]))  # el repetido no se duplica
-    assert texto.count("SVQ") == 1 and "XRY" in texto and " o " in texto and "ORY" in texto
+    texto = ruta_txt(busqueda(origenes_extra=["XRY", "SVQ"], destinos_extra=["CDG"]))  # el repetido no se duplica
+    assert texto.count("SVQ") == 1 and "XRY" in texto and " o " in texto and "ORY" in texto and "CDG" not in texto
 
 
 def test_bajada_fuerte_avisa_aunque_no_llegue_al_objetivo():

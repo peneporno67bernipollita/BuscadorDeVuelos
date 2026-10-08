@@ -56,6 +56,13 @@ function botonesComprar(p, { grande = false } = {}) {
     ? `<a class="${clase}" href="${esc(d.google_flights)}" target="_blank" rel="noopener">${icono("etiqueta")}Ver en Google Flights</a>` : "";
 }
 
+/** Si sales de un aeropuerto (p. ej. Jerez) y la vuelta llega a otro (p. ej. Sevilla). */
+function vueltaAOtro(d) {
+  const sales = d.ida?.tramos?.[0]?.origen;
+  const llegas = d.vuelta?.tramos?.at(-1)?.destino;
+  return sales && llegas && sales !== llegas ? { sales, llegas } : null;
+}
+
 function tarjetaVuelo(p, aerolineas, esMejor) {
   const d = p.detalle || {};
   const enlaces = (d.enlaces || []).map((e) =>
@@ -68,6 +75,7 @@ function tarjetaVuelo(p, aerolineas, esMejor) {
           ${esMejor ? `<span class="chip ok">${icono("check")}La mejor</span>` : ""}
           <span class="chip">${esc(NOMBRE_FUENTE[p.fuente] || p.fuente)}</span>
           ${d.billetes_separados ? `<span class="chip alerta">${icono("aviso")}2 billetes</span>` : ""}
+          ${vueltaAOtro(d) ? `<span class="chip alerta">${icono("intercambiar")}Vuelves a ${esc(vueltaAOtro(d).llegas)}</span>` : ""}
         </div>
       </div>
       ${lineaTrayecto("Ida", d.ida, aerolineas)}
@@ -75,6 +83,7 @@ function tarjetaVuelo(p, aerolineas, esMejor) {
       <div class="vuelo-pie">
         <div class="desglose">
           <span>Billetes ${eur(p.precio_billetes)}${Number(p.precio_maletas) ? ` · maletas ${eur(p.precio_maletas)} <span class="chip alerta" title="${esc((d.desglose_maletas || []).join("\n"))}">máx. estimado</span>` : ""}${Number(p.descuento) ? ` · descuento −${eur(p.descuento)}` : ""}</span>
+          ${vueltaAOtro(d) ? `<span style="color:var(--alerta)">Sales de ${esc(vueltaAOtro(d).sales)} y vuelves a ${esc(vueltaAOtro(d).llegas)}: más barato así.</span>` : ""}
           ${(d.notas || []).map((n) => `<span class="tenue">${esc(n)}</span>`).join("")}
         </div>
         <div class="acciones">${botonesComprar(p)}${enlaces}

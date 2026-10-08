@@ -115,7 +115,7 @@ def main() -> None:
             for t in o.tramos
         )
         print(f"{i}. {eur(o.precio_total)} = billetes {eur(o.precio_billetes)} + maletas {eur(o.precio_maletas)} "
-              f"- dto {eur(o.descuento)} [{o.fuente}{', billetes separados' if o.billetes_separados else ''}]\n   {tr}")
+              f"- dto {eur(o.descuento)} [{o.fuente}{', billetes separados' if o.billetes_separados else ''}{', VUELTA A OTRO AEROPUERTO' if o.vuelta_a_otro_aeropuerto else ''}]\n   {tr}")
     print(f"\nDecisión: {'AVISAR' if decision.avisar else 'esperar'} {decision.tipo} {decision.motivo}")
     if validas:
         print("\n--- Vista previa del mensaje de Telegram ---")

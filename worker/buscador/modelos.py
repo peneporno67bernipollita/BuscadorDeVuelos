@@ -102,6 +102,11 @@ class Opcion:
         return [t for tr in self.trayectos for t in tr.tramos]
 
     @property
+    def vuelta_a_otro_aeropuerto(self) -> bool:
+        """Sales de un aeropuerto (p. ej. Jerez) y la vuelta llega a otro (p. ej. Sevilla)."""
+        return self.vuelta is not None and self.vuelta.destino != self.ida.origen
+
+    @property
     def clave(self) -> tuple:
         """Identifica el itinerario para no repetir la misma opción de dos fuentes."""
         return tuple((t.aerolinea, t.numero, t.salida.isoformat()) for t in self.tramos)
@@ -112,6 +117,7 @@ class Opcion:
             "ida": self.ida.a_dict(),
             "vuelta": self.vuelta.a_dict() if self.vuelta else None,
             "billetes_separados": self.billetes_separados,
+            "vuelta_a_otro_aeropuerto": self.vuelta_a_otro_aeropuerto,
             "precio_billetes": round(self.precio_billetes, 2),
             "precio_maletas": round(self.precio_maletas, 2),
             "maletas_estimadas": self.maletas_estimadas,

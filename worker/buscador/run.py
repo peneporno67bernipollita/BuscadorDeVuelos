@@ -252,6 +252,16 @@ def acumular_calendario(info: dict, nuevos: list, hoy: date, dias_validez: int =
     info["chollo_turno"] = int(info.get("chollo_turno", 0)) + 1
 
 
+def opciones_a_guardar(validas: list[Opcion], n: int = OPCIONES_GUARDADAS) -> list[Opcion]:
+    """Las n más baratas; si la más barata vuelve a otro aeropuerto, se guarda también la mejor que vuelve
+    al mismo del que sales (para que puedas compararlas)."""
+    elegidas = validas[:n]
+    mismo = next((o for o in validas if not o.vuelta_a_otro_aeropuerto), None)
+    if mismo is not None and mismo not in elegidas:
+        elegidas = elegidas[: n - 1] + [mismo]
+    return elegidas
+
+
 def _fila_precio(b: dict, op: Opcion, es_mejor: bool, aerolineas: dict) -> dict:
     detalle = op.a_dict()
     detalle["enlaces"] = enlaces.compra(b, op, aerolineas)
@@ -307,7 +317,7 @@ def procesar_busqueda(
     horas = (ahora - _fecha_hora(puntos[0]["revisado"])).total_seconds() / 3600 if puntos else 0.0
 
     if validas:
-        db.insertar("precios", [_fila_precio(b, op, i == 0, aerolineas) for i, op in enumerate(validas[:OPCIONES_GUARDADAS])])
+        db.insertar("precios", [_fila_precio(b, op, i == 0, aerolineas) for i, op in enumerate(opciones_a_guardar(validas))])
 
     mejor = validas[0] if validas else None
     decision = decidir(b, mejor, historial, calendario, hoy, horas_historial=horas)
@@ -342,6 +352,7 @@ def procesar_busqueda(
             b, mejor, decision, enlaces.compra(b, mejor, aerolineas), enlaces.google_flights(b, mejor), aerolineas,
             f"{url_web.rstrip('/')}/#/busqueda/{b['id']}" if url_web else None,
             comprar=enlaces.comprar_ya(b, mejor),
+            mismo_aeropuerto=next((o for o in validas if not o.vuelta_a_otro_aeropuerto), None),
         )
         chat = (perfil or {}).get("telegram_chat_id")
         entregado = bool(tg and chat and tg.enviar(chat, texto))
