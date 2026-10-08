@@ -1,0 +1,5 @@
+# Configuración de Cloudflare Pages: solo se publica la carpeta web/
+# (el resto del repositorio —robot, SQL, documentación— no debe quedar en internet).
+name = "buscadordevuelos"
+pages_build_output_dir = "web"
+compatibility_date = "2026-10-01"
