@@ -2,7 +2,7 @@ import { api } from "../api.js";
 import { miniGrafica } from "../graficas.js";
 import { icono } from "../iconos.js";
 import {
-  $, aeropuertos, aeropuertosDe, aviso, cadaSegundos, alSalir, contarHasta, cuentaAtras, deltaHtml, destello, esc, eur, fechaHora,
+  $, aeropuertos, aeropuertosDe, aviso, cadaSegundos, alSalir, tablero, contarHasta, cuentaAtras, deltaHtml, destello, esc, eur, fechaHora,
   fechasTexto, hace, limpiarPantalla, pasajerosTexto,
 } from "../util.js";
 
@@ -18,9 +18,9 @@ function rutaHtml(datos, b) {
   const alternativos = (lista) => (lista.length > 1 ? `<div class="alternativos">o ${lista.slice(1).map(esc).join(" · ")}</div>` : "");
   return `
     <div class="ruta" title="${b.ida_vuelta ? "Ida y vuelta" : "Solo ida"}">
-      <div class="aeropuerto"><div class="codigo">${esc(origenes[0])}</div><div class="ciudad">${ciudad(origenes[0])}</div>${alternativos(origenes)}</div>
+      <div class="aeropuerto"><div class="codigo">${tablero(origenes[0])}</div><div class="ciudad">${ciudad(origenes[0])}</div>${alternativos(origenes)}</div>
       <div class="trazo">${icono("avion")}</div>
-      <div class="aeropuerto fin"><div class="codigo">${esc(destinos[0])}</div><div class="ciudad">${ciudad(destinos[0])}</div>${alternativos(destinos)}</div>
+      <div class="aeropuerto fin"><div class="codigo">${tablero(destinos[0])}</div><div class="ciudad">${ciudad(destinos[0])}</div>${alternativos(destinos)}</div>
     </div>`;
 }
 
@@ -101,7 +101,6 @@ export async function vistaPanel(app) {
     <div>
       <div class="cabecera-pagina">
         <div>
-          <span class="etiqueta-superior">${icono("panel")} Panel</span>
           <h1>${saludo}${perfil.nombre ? `, ${esc(perfil.nombre)}` : ""} ✈️</h1>
           <p class="subtitulo">${activas.length ? `Vigilando ${activas.length} búsqueda${activas.length > 1 ? "s" : ""} sin parar.` : "Crea tu primera búsqueda y el robot se pondrá a vigilarla."}</p>
         </div>

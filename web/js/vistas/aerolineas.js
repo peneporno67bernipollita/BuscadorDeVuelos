@@ -30,7 +30,6 @@ export async function vistaAerolineas(app) {
     <div>
       <div class="cabecera-pagina">
         <div>
-          <span class="etiqueta-superior">${icono("escudo")} Seguridad</span>
           <h1>Aerolíneas de confianza</h1>
           <p class="subtitulo">Solo se aceptan vuelos vendidos <b>y operados</b> por aerolíneas de esta lista.</p>
         </div>

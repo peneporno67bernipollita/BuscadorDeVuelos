@@ -119,7 +119,6 @@ export async function vistaEstado(app) {
     <div>
       <div class="cabecera-pagina">
         <div>
-          <span class="etiqueta-superior">${icono("robot")} Robot</span>
           <h1>Estado del robot</h1>
           <p class="subtitulo">Qué está haciendo ahora mismo, qué webs consulta y cómo han ido las últimas vueltas.</p>
         </div>

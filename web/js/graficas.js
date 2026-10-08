@@ -2,6 +2,8 @@
 import { eur, fechaHora } from "./util.js";
 
 const css = (variable) => getComputedStyle(document.documentElement).getPropertyValue(variable).trim();
+// Las gráficas usan la misma letra que la interfaz
+if (window.Chart) Chart.defaults.font.family = css("--fuente-texto") || "system-ui";
 
 function degradado(ctx, area, color) {
   const g = ctx.createLinearGradient(0, area.top, 0, area.bottom);

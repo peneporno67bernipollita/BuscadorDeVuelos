@@ -4,10 +4,9 @@ import { $, aviso, conCarga, esc } from "../util.js";
 
 const MAPA = `
   <svg class="mapa-vuelo" viewBox="0 0 600 360" fill="none" aria-hidden="true">
-    <path class="trayectoria" d="M40 300 C 180 120, 360 90, 560 60" stroke="url(#g)" stroke-width="2.5"/>
-    <circle cx="40" cy="300" r="7" fill="#22d3ee"/><circle cx="560" cy="60" r="7" fill="#a78bfa"/>
-    <circle cx="40" cy="300" r="16" stroke="#22d3ee" stroke-opacity=".35"/><circle cx="560" cy="60" r="16" stroke="#a78bfa" stroke-opacity=".35"/>
-    <defs><linearGradient id="g" x1="0" x2="1"><stop stop-color="#22d3ee"/><stop offset="1" stop-color="#a78bfa"/></linearGradient></defs>
+    <path class="trayectoria" d="M40 300 C 180 120, 360 90, 560 60" style="stroke: var(--primario)" stroke-width="2.5"/>
+    <circle cx="40" cy="300" r="7" style="fill: var(--primario)"/><circle cx="560" cy="60" r="7" style="fill: var(--primario)"/>
+    <circle cx="40" cy="300" r="16" style="stroke: var(--primario)" stroke-opacity=".3"/><circle cx="560" cy="60" r="16" style="stroke: var(--primario)" stroke-opacity=".3"/>
   </svg>`;
 
 export function vistaAcceso(app) {
@@ -17,8 +16,7 @@ export function vistaAcceso(app) {
     app.innerHTML = `
       <div class="acceso pagina">
         <section class="acceso-heroe">
-          <span class="etiqueta-superior">${icono("chispas")} Vuelos baratos en piloto automático</span>
-          <h1>Deja que el robot<br><span class="texto-degradado">vigile los precios</span><br>por ti.</h1>
+          <h1>Deja que el robot <span class="texto-degradado">vigile los precios</span> por ti.</h1>
           <p class="grande">Revisa tus búsquedas sin parar, te enseña la evolución en directo y te avisa por Telegram
             cuando llega el buen momento para comprar.</p>
           <ul class="ventajas">

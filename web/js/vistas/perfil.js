@@ -139,7 +139,6 @@ export async function vistaPerfil(app, primeraVez, alTerminar) {
     <div>
       <div class="cabecera-pagina">
         <div>
-          <span class="etiqueta-superior">${icono("usuario")} ${primeraVez ? "Bienvenida" : "Perfil"}</span>
           <h1>${primeraVez ? "👋 Antes de empezar" : "Tu perfil"}</h1>
           <p class="subtitulo">${primeraVez
             ? "Solo se pregunta una vez. Con esto el robot calcula tus descuentos y sabe dónde avisarte."

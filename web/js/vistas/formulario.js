@@ -171,7 +171,6 @@ export async function vistaFormulario(app, id, duplicar = false) {
     <div>
       <div class="cabecera-pagina">
         <div>
-          <span class="etiqueta-superior">${icono(editando ? "editar" : "mas")} ${editando ? "Editar" : "Nueva"} búsqueda</span>
           <h1>${editando ? "Ajusta tu búsqueda" : "¿Adónde quieres volar?"}</h1>
           <p class="subtitulo">El robot la revisará sin parar y te avisará por Telegram en el mejor momento.</p>
         </div>

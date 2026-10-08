@@ -96,6 +96,39 @@ export function contarHasta(el, hasta, { desde = 0, formato = (n) => eur(n), dur
   requestAnimationFrame(paso);
 }
 
+/** Código de aeropuerto en fichas de panel de salidas (accesible como texto normal). */
+export function tablero(codigo) {
+  const letras = [...String(codigo || "")].map((l) => `<span class="letra" aria-hidden="true">${esc(l)}</span>`).join("");
+  return `<span class="tablero" role="img" aria-label="${esc(codigo)}">${letras}</span>`;
+}
+
+/** Las fichas giran unas vueltas y se quedan en su letra, como en un aeropuerto (no con movimiento reducido). */
+export function animarTableros(raiz = document) {
+  if (sinMovimiento()) return;
+  const abecedario = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  raiz.querySelectorAll(".tablero").forEach((t) => {
+    [...t.querySelectorAll(".letra")].forEach((ficha, i) => {
+      const final = ficha.textContent;
+      let vueltas = 4 + i * 3;
+      const id = setInterval(() => {
+        ficha.classList.remove("gira");
+        void ficha.offsetWidth;
+        ficha.classList.add("gira");
+        if (--vueltas <= 0) {
+          ficha.textContent = final;
+          clearInterval(id);
+          return;
+        }
+        ficha.textContent = abecedario[Math.floor(Math.random() * abecedario.length)];
+      }, 60);
+      alSalir(() => {
+        clearInterval(id);
+        ficha.textContent = final;
+      });
+    });
+  });
+}
+
 /** Destello verde (baja) o rojo (sube) al cambiar un precio en directo. */
 export function destello(el, sentido) {
   if (!el) return;

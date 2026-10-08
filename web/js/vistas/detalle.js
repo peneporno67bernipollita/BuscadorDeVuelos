@@ -2,7 +2,7 @@ import { api } from "../api.js";
 import { graficaPrecios } from "../graficas.js";
 import { icono } from "../iconos.js";
 import {
-  $, aeropuertos, aeropuertosDe, alSalir, aviso, cadaSegundos, confirmar, contarHasta, cuentaAtras, deltaHtml, destello, esc, eur,
+  $, aeropuertos, aeropuertosDe, alSalir, animarTableros, tablero, aviso, cadaSegundos, confirmar, contarHasta, cuentaAtras, deltaHtml, destello, esc, eur,
   fecha, fechaHora, fechasTexto, hace, horaLocal, limpiarPantalla, maletasTexto, pasajerosTexto,
 } from "../util.js";
 
@@ -218,7 +218,6 @@ export async function vistaDetalle(app, id) {
       <section class="tarjeta heroe">
         <div class="fila entre" style="align-items:flex-start">
           <div>
-            <span class="etiqueta-superior">${icono(b.modo === "chollo" ? "llama" : "calendario")} ${b.modo === "chollo" ? "Chollo · cualquier fecha" : "Fechas concretas"}</span>
             <h1 style="margin:0">${esc(b.nombre)}</h1>
           </div>
           <div class="acciones">
@@ -228,11 +227,12 @@ export async function vistaDetalle(app, id) {
           </div>
         </div>
         <div class="ruta grande" style="margin:1.4rem 0 1.2rem">
-          <div class="aeropuerto"><div class="codigo">${esc(b.origen)}</div><div class="ciudad">${ciudad(b.origen)}</div>${alternativos(origenes)}</div>
+          <div class="aeropuerto"><div class="codigo">${tablero(b.origen)}</div><div class="ciudad">${ciudad(b.origen)}</div>${alternativos(origenes)}</div>
           <div class="trazo">${icono("avion")}</div>
-          <div class="aeropuerto fin"><div class="codigo">${esc(b.destino)}</div><div class="ciudad">${ciudad(b.destino)}</div>${alternativos(destinos)}</div>
+          <div class="aeropuerto fin"><div class="codigo">${tablero(b.destino)}</div><div class="ciudad">${ciudad(b.destino)}</div>${alternativos(destinos)}</div>
         </div>
         <div class="fila" style="gap:.45rem">
+          ${b.modo === "chollo" ? `<span class="chip">${icono("llama")}Chollo: cualquier fecha</span>` : ""}
           <span class="chip">${icono("calendario")}${esc(fechasTexto(b))}</span>
           <span class="chip">${icono("personas")}${esc(pasajerosTexto(b))}</span>
           <span class="chip">${icono("maleta")}${esc(maletasTexto(b))}</span>
@@ -254,7 +254,7 @@ export async function vistaDetalle(app, id) {
           </div>
           <div class="fila">
             <div class="buscando oculto" id="buscando"></div>
-            <div class="precio-grande gigante texto-degradado" id="precio-actual">—</div>
+            <div class="precio-grande gigante" id="precio-actual">—</div>
             <span id="delta-actual">${info.variacion != null ? deltaHtml(info.variacion) : ""}</span>
           </div>
         </div>
@@ -306,6 +306,8 @@ export async function vistaDetalle(app, id) {
         </div>
       </div>
     </div>`;
+
+  animarTableros($(".ruta"));
 
   // ---- Precio actual (o "buscando…") y veredicto ----
   const precioEl = $("#precio-actual");
