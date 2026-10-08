@@ -29,6 +29,10 @@ HORAS_PARA_CHOLLO_ANTICIPADO = 24
 # Bajada fuerte: avisar aunque no sea "el momento" ni llegue a tu objetivo (p. ej. de 171 € a 70 €)
 BAJADA_FUERTE_PCT = 0.15
 BAJADA_FUERTE_EUR = 15.0
+# Modo presupuesto: avisar también si se queda cerca del objetivo (lo que sea mayor de las dos cosas).
+# P. ej. con 30 € de objetivo, hasta 50 €; con 600 €, hasta 720 €.
+CERCA_OBJETIVO_PCT = 0.20
+CERCA_OBJETIVO_EUR = 20.0
 
 
 @dataclass
@@ -54,6 +58,15 @@ def _percentil(valores: list[float], p: float) -> float:
 
 def _eur(x: float) -> str:
     return f"{x:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def _no_supera_minimo(total: float, historial: list[float]) -> bool:
+    """Un "chollo" nunca puede ser más caro que lo más barato ya visto en esta búsqueda."""
+    return not historial or total <= min(historial) + 0.005
+
+
+def margen_objetivo(presupuesto: float) -> float:
+    return max(presupuesto * CERCA_OBJETIVO_PCT, CERCA_OBJETIVO_EUR)
 
 
 def _bajada_fuerte(total: float, historial: list[float], contexto: dict) -> Decision | None:
@@ -106,6 +119,15 @@ def decidir(
 
     # --- Ya se avisó antes: solo se vuelve a avisar si baja de verdad ---
     if ultimo is not None:
+        if busqueda.get("modo_precio") == "presupuesto" and busqueda.get("presupuesto") is not None:
+            presupuesto = float(busqueda["presupuesto"])
+            if total <= presupuesto < ultimo:
+                return Decision(
+                    True, "presupuesto", "✅ ¡Ya está dentro de tu presupuesto!",
+                    f"Total {_eur(total)} para todos, sin pasar de tu máximo de {_eur(presupuesto)} "
+                    f"(el último aviso fue de {_eur(ultimo)}).",
+                    contexto=contexto,
+                )
         if total <= ultimo * (1 - BAJADA_MINIMA_PCT) or ultimo - total >= BAJADA_MINIMA_EUR:
             return Decision(
                 True, "bajada", "📉 ¡Ha bajado todavía más!",
@@ -123,6 +145,13 @@ def decidir(
                 f"Total {_eur(total)} para todos, sin pasar de tu máximo de {_eur(presupuesto)}.",
                 contexto=contexto,
             )
+        if total <= presupuesto + margen_objetivo(presupuesto) and _no_supera_minimo(total, historial):
+            return Decision(
+                True, "cerca_objetivo", "🎯 ¡Muy cerca de tu objetivo!",
+                f"Total {_eur(total)}: solo {_eur(total - presupuesto)} por encima de tu objetivo de {_eur(presupuesto)}. "
+                "Si te vale, puede ser buen momento; sigo vigilando y te aviso si baja de tu objetivo.",
+                contexto=contexto,
+            )
         if modo_fechas and dias is not None and dias <= DIAS_AVISO_FINAL and not busqueda.get("aviso_final_enviado"):
             return Decision(
                 True, "sin_presupuesto", "⚠️ Aún no hay nada dentro de tu presupuesto",
@@ -138,14 +167,15 @@ def decidir(
         if len(calendario) >= 5:
             mediana = median(calendario)
             umbral = min(_percentil(calendario, 20), mediana * 0.80)
-            if mejor.precio_billetes <= umbral:
+            if mejor.precio_billetes <= umbral and _no_supera_minimo(total, historial):
                 return Decision(
                     True, "chollo", "🔥 ¡Chollo encontrado!",
                     f"Billetes a {_eur(mejor.precio_billetes)}, al menos un 20 % por debajo del precio "
                     f"normal de esta ruta en tus fechas (mediana {_eur(mediana)}).",
                     contexto=contexto,
                 )
-        if len(historial) >= 4 and horas_historial >= HORAS_PARA_MINIMO and total <= median(historial) * 0.80:
+        if (len(historial) >= 4 and horas_historial >= HORAS_PARA_MINIMO and total <= median(historial) * 0.80
+                and _no_supera_minimo(total, historial)):
             return Decision(
                 True, "chollo", "🔥 ¡Chollo encontrado!",
                 f"{_eur(total)}: un 20 % por debajo de lo que he visto hasta ahora en esta ruta.",
@@ -191,13 +221,14 @@ def decidir(
         return _bajada_fuerte(total, historial, contexto) or Decision(False, contexto=contexto)
 
     # Todavía es pronto: solo se avisa si es algo excepcional
-    if len(historial) >= 6 and horas_historial >= HORAS_PARA_CHOLLO_ANTICIPADO and total <= median(historial) * 0.80:
+    if (len(historial) >= 6 and horas_historial >= HORAS_PARA_CHOLLO_ANTICIPADO and total <= median(historial) * 0.80
+            and _no_supera_minimo(total, historial)):
         return Decision(
             True, "chollo", "🔥 Chollo anticipado",
             f"Aún es pronto ({dias} días), pero {_eur(total)} está un 20 % por debajo de lo que he visto.",
             contexto=contexto,
         )
-    if len(calendario) >= 10 and mejor.precio_billetes <= median(calendario) * 0.75:
+    if len(calendario) >= 10 and mejor.precio_billetes <= median(calendario) * 0.75 and _no_supera_minimo(total, historial):
         return Decision(
             True, "chollo", "🔥 Chollo anticipado",
             f"Aún es pronto ({dias} días), pero los billetes están un 25 % por debajo de lo normal "

@@ -9,7 +9,7 @@ import {
 const NOMBRE_FUENTE = { google_flights: "Google Flights", ryanair: "Ryanair", skyscanner: "Skyscanner" };
 const TIPO_AVISO = {
   presupuesto: "Dentro de presupuesto", buen_momento: "Buen momento para comprar", proximo: "Viaje próximo",
-  final: "Último aviso", bajada: "Ha bajado todavía más", bajada_fuerte: "Bajada fuerte de precio", chollo: "Chollo", sin_presupuesto: "Nada dentro de presupuesto",
+  final: "Último aviso", bajada: "Ha bajado todavía más", bajada_fuerte: "Bajada fuerte de precio", cerca_objetivo: "Muy cerca de tu objetivo", chollo: "Chollo", sin_presupuesto: "Nada dentro de presupuesto",
 };
 const PERIODOS = { "24h": 1, "7d": 7, todo: null };
 

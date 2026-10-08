@@ -8,7 +8,7 @@ import {
 
 const TIPO_AVISO = {
   presupuesto: "Dentro de presupuesto", buen_momento: "Buen momento", proximo: "Viaje próximo", final: "Último aviso",
-  bajada: "Ha bajado más", bajada_fuerte: "Bajada fuerte", chollo: "Chollo", sin_presupuesto: "Nada dentro de presupuesto",
+  bajada: "Ha bajado más", bajada_fuerte: "Bajada fuerte", cerca_objetivo: "Cerca de tu objetivo", chollo: "Chollo", sin_presupuesto: "Nada dentro de presupuesto",
 };
 
 function rutaHtml(datos, b) {

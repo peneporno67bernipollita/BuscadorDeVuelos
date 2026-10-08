@@ -121,7 +121,8 @@ def _con_total(total, billetes=None):
 def test_presupuesto():
     b = busqueda(modo_precio="presupuesto", presupuesto=200)
     hoy = date(2026, 9, 1)
-    assert decidir(b, _con_total(210), [], [], hoy).avisar is False
+    assert decidir(b, _con_total(250), [], [], hoy).avisar is False  # más allá del margen (200 + 20 % = 240)
+    assert decidir(b, _con_total(210), [], [], hoy).tipo == "cerca_objetivo"
     d = decidir(b, _con_total(199.99), [], [], hoy)
     assert d.avisar and d.tipo == "presupuesto"
 
@@ -255,6 +256,27 @@ def test_bajada_fuerte_avisa_aunque_no_llegue_al_objetivo():
     assert decidir(b, _con_total(165), [171, 172, 171], [], date(2026, 9, 1)).avisar is False
     # Si llega al objetivo, manda el aviso de objetivo (más importante)
     assert decidir(b, _con_total(29), [171], [], date(2026, 9, 1)).tipo == "presupuesto"
+
+
+def test_chollo_nunca_mas_caro_que_el_minimo_visto():
+    b = busqueda(modo="chollo", chollo_desde="2026-10-09", chollo_hasta="2026-10-28")
+    calendario = [150, 200, 260, 300, 340, 380, 420, 460]  # fechas caras del periodo: mediana alta
+    # 182 € es "barato" frente a la mediana del periodo, pero ya se vio 171 €: no es un chollo
+    assert decidir(b, _con_total(182, billetes=182), [171, 175], calendario, date(2026, 10, 8)).avisar is False
+    assert decidir(b, _con_total(165, billetes=165), [171, 175], calendario, date(2026, 10, 8)).tipo == "chollo"
+
+
+def test_cerca_del_objetivo_y_despues_dentro():
+    b = busqueda(modo_precio="presupuesto", presupuesto=30)
+    hoy = date(2026, 9, 1)
+    cerca = decidir(b, _con_total(45), [60], [], hoy)  # objetivo 30: avisa hasta 50 €
+    assert cerca.tipo == "cerca_objetivo" and cerca.fija_precio
+    assert decidir(b, _con_total(55), [60], [], hoy).avisar is False
+    assert decidir(b, _con_total(45), [40], [], hoy).avisar is False  # ya se vio más barato
+    # Ya avisado a 45 €: al bajar de 30 llega el aviso de "dentro de tu presupuesto", aunque baje poco
+    ya = busqueda(modo_precio="presupuesto", presupuesto=30, ultimo_aviso_precio=31)
+    assert decidir(ya, _con_total(29.5), [31], [], hoy).tipo == "presupuesto"
+    assert decidir(ya, _con_total(30.5), [31], [], hoy).avisar is False
 
 
 def test_chollo_cercano_se_revisa_cada_20_minutos():
