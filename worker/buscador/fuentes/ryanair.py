@@ -13,6 +13,7 @@ from datetime import date, datetime, timedelta
 import httpx
 
 from .. import filtros
+from ..tiempo import hoy
 from ..modelos import FuenteBloqueada, Opcion, ResultadoFuente, Tramo, Trayecto
 
 log = logging.getLogger(__name__)
@@ -74,7 +75,7 @@ class Ryanair:
             ida_desde = date.fromisoformat(str(b["chollo_desde"]))
             ida_hasta = date.fromisoformat(str(b["chollo_hasta"]))
             noches_min, noches_max = b.get("noches_min"), b.get("noches_max")
-        ida_desde = max(ida_desde, date.today() + timedelta(days=1))
+        ida_desde = max(ida_desde, hoy() + timedelta(days=1))
         if ida_hasta < ida_desde:
             return res
 

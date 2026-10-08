@@ -12,13 +12,14 @@ import argparse
 import json
 import logging
 import uuid
-from datetime import date
+
 from pathlib import Path
 
 from . import enlaces
 from .avisos import eur, mensaje_aviso
 from .decision import decidir
 from .filtros import Validador
+from .tiempo import hoy
 from .nucleo import consultar, crear_fuentes, evaluar
 
 DATOS = Path(__file__).resolve().parent / "datos" / "aerolineas.json"
@@ -93,7 +94,7 @@ def main() -> None:
         fuentes, {n: [b] for n in fuentes}, {b["id"]: Validador(b, aerolineas)}, CONFIG, 15 * 60
     )
     validas, rechazos, calendario = evaluar(b, resultados.get(b["id"], {}), perfil, aerolineas)
-    decision = decidir(b, validas[0] if validas else None, [], calendario, date.today())
+    decision = decidir(b, validas[0] if validas else None, [], calendario, hoy())
 
     if a.json:
         print(json.dumps({"opciones": [o.a_dict() for o in validas[:10]], "rechazos": rechazos,

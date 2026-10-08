@@ -112,7 +112,56 @@ def mensaje_aviso(
     if url_web:
         lineas.append(f'📈 <a href="{_e(url_web)}">Historial en tu web</a>')
     lineas.append("Revisa el precio final en la web antes de pagar: puede cambiar en cualquier momento.")
-    return "\n".join(lineas)[:4000]
+    return unir_sin_pasarse(lineas)
+
+
+LIMITE_TELEGRAM = 4000  # Telegram admite 4096 caracteres por mensaje
+
+
+def unir_sin_pasarse(lineas: list[str], limite: int = LIMITE_TELEGRAM) -> str:
+    """Une líneas completas sin pasar del límite (cortar a mitad rompería el HTML del mensaje)."""
+    texto = ""
+    for linea in lineas:
+        siguiente = f"{texto}\n{linea}" if texto else linea
+        if len(siguiente) > limite - 2:
+            return texto + "\n…"
+        texto = siguiente
+    return texto
+
+
+AYUDA = (
+    "✈️ <b>Buscador de Vuelos</b>\n"
+    "Te aviso por aquí cuando una de tus búsquedas llega a buen precio.\n\n"
+    "/estado · cómo van tus búsquedas ahora mismo\n"
+    "/ayuda · este mensaje\n\n"
+    "Las búsquedas se crean y se editan en tu web."
+)
+
+MENSAJE_PRUEBA = (
+    "🧪 <b>Mensaje de prueba</b>\n"
+    "Si lees esto, los avisos de tu Buscador de Vuelos te llegarán aquí. ✅\n"
+    "Escribe /estado para ver cómo van tus búsquedas."
+)
+
+
+def mensaje_estado(busquedas: list[dict], url_web: str | None) -> str:
+    """Resumen de las búsquedas activas para el comando /estado."""
+    activas = [b for b in busquedas if b.get("activa")]
+    if not activas:
+        return "No tienes ninguna búsqueda activa. Créala en tu web" + (f": {_e(url_web)}" if url_web else ".")
+    lineas = [f"📋 <b>Tus búsquedas</b> ({len(activas)})", ""]
+    for b in activas:
+        ruta = f"{aeropuertos.nombre(b['origen'])} → {aeropuertos.nombre(b['destino'])}"
+        if b.get("precio_actual") is not None:
+            precio = f"💶 <b>{eur(float(b['precio_actual']))}</b>"
+            if b.get("mejor_precio") is not None:
+                precio += f" · mínimo visto {eur(float(b['mejor_precio']))}"
+        else:
+            precio = "💶 sin precio todavía"
+        lineas += [f"<b>{_e(b['nombre'])}</b>", _e(ruta), precio, f"ℹ️ {_e(b.get('estado') or 'Pendiente')}", ""]
+    if url_web:
+        lineas.append(f'📈 <a href="{_e(url_web)}">Abrir tu web</a>')
+    return unir_sin_pasarse(lineas)
 
 
 class Telegram:

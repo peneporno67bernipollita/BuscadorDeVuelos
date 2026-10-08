@@ -18,6 +18,7 @@ create table if not exists public.perfiles (
     check (residente in ('ninguno', 'canarias', 'baleares', 'melilla')),
   telegram_chat_id text,
   telegram_codigo text,
+  telegram_prueba boolean not null default false,
   perfil_completado boolean not null default false,
   creado timestamptz not null default now()
 );
@@ -111,6 +112,7 @@ create table if not exists public.precios (
   detalle jsonb not null default '{}'::jsonb
 );
 create index if not exists precios_busqueda_idx on public.precios (busqueda, revisado desc);
+create index if not exists precios_grafica_idx on public.precios (busqueda, es_mejor, revisado);
 
 -- ---------------------------------------------------------------------
 -- Avisos enviados por Telegram
@@ -320,11 +322,40 @@ create policy "ejecuciones: leer" on public.ejecuciones
 insert into public.estado_fuentes
   (fuente, nombre, activa, intervalo_min, pausa_min_s, pausa_max_s, max_peticiones, descripcion)
 values
-  ('google_flights', 'Google Flights', true, 140, 6, 16, 60,
-   'Fuente principal: compara casi todas las aerolíneas (Ryanair, Vueling, Iberia, easyJet...). Ronda cada 2 h + 20 min; 6-16 s entre peticiones (el doble de lo recomendado).'),
-  ('ryanair', 'Ryanair (web oficial)', true, 380, 120, 140, 3,
-   'Confirma el precio en la propia Ryanair. Ronda cada 6 h + 20 min; 2 min entre peticiones (el doble de lo recomendado).'),
+  ('google_flights', 'Google Flights', true, 5, 6, 16, 60,
+   'Fuente principal: compara casi todas las aerolíneas (Ryanair, Vueling, Iberia, easyJet...). Cada búsqueda se revisa cada 20-90 min según lo cerca que esté el viaje; 6-16 s entre peticiones.'),
+  ('ryanair', 'Ryanair (web oficial)', true, 30, 120, 140, 3,
+   'Confirma el precio en la propia Ryanair. Una ronda cada 30 min como mucho; 2 min entre peticiones (el doble de lo recomendado).'),
   ('skyscanner', 'Skyscanner', false, 740, 30, 60, 2,
    'Desactivada: Skyscanner bloquea a los robots desde la primera petición (prueba del 6/10/2026). Puedes activarla para reintentar; si bloquea, el robot la deja descansar.')
 on conflict (fuente) do update set
   nombre = excluded.nombre, descripcion = excluded.descripcion;
+
+-- =====================================================================
+-- Actualización v2 (robot continuo y web en tiempo real).
+-- Sirve también para instalaciones anteriores: se puede ejecutar varias veces.
+-- =====================================================================
+alter table public.perfiles add column if not exists telegram_prueba boolean not null default false;
+
+-- La web puede leer la "señal de vida" del robot (nada más de la tabla de ajustes)
+drop policy if exists "ajustes: latido" on public.ajustes;
+create policy "ajustes: latido" on public.ajustes
+  for select to authenticated using (clave = 'latido');
+
+-- Tiempo real: la web recibe al momento los precios nuevos y los cambios de las búsquedas
+do $$
+declare
+  tabla text;
+begin
+  if exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
+    foreach tabla in array array['precios', 'busquedas', 'avisos', 'ejecuciones', 'estado_fuentes'] loop
+      if not exists (
+        select 1 from pg_publication_tables
+        where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = tabla
+      ) then
+        execute format('alter publication supabase_realtime add table public.%I', tabla);
+      end if;
+    end loop;
+  end if;
+end;
+$$;

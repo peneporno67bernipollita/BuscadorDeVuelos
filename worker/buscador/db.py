@@ -40,3 +40,9 @@ class Supabase:
         """Inserta o actualiza por clave primaria."""
         cabeceras = {"Prefer": "resolution=merge-duplicates,return=minimal"}
         self._revisar(self.http.post(f"{self.base}/{tabla}", json=filas, headers=cabeceras))
+
+    def borrar(self, tabla: str, filtros: dict) -> None:
+        """Borra las filas que cumplen los filtros (nunca sin filtros)."""
+        if not filtros:
+            raise ValueError("borrar() necesita al menos un filtro")
+        self._revisar(self.http.delete(f"{self.base}/{tabla}", params=filtros))

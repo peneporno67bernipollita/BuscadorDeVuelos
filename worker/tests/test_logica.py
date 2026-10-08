@@ -142,7 +142,9 @@ def test_viaje_proximo_avisa_ya():
 def test_ventana_optima_minimo_visto():
     b = busqueda()
     hoy = date(2026, 10, 1)  # 45 días antes: dentro de la ventana para Europa
-    assert decidir(b, _con_total(250), [260, 255], [], hoy).tipo == "buen_momento"
+    assert decidir(b, _con_total(250), [260, 255], [], hoy, horas_historial=12).tipo == "buen_momento"
+    # Con solo 1 hora observada todavía no se fía del mínimo
+    assert decidir(b, _con_total(250), [260, 255], [], hoy, horas_historial=1).avisar is False
     assert decidir(b, _con_total(270), [260, 255], [], hoy).avisar is False
 
 
@@ -151,7 +153,7 @@ def test_pronto_solo_chollos():
     hoy = date(2026, 7, 1)  # 137 días antes: demasiado pronto para Europa
     assert decidir(b, _con_total(250), [260, 255], [], hoy).avisar is False
     hist = [300, 310, 305, 300, 295, 300]
-    assert decidir(b, _con_total(230), hist, [], hoy).tipo == "chollo"
+    assert decidir(b, _con_total(230), hist, [], hoy, horas_historial=30).tipo == "chollo"
 
 
 def test_chollo_por_calendario():

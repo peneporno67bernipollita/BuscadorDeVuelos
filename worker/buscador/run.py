@@ -1,14 +1,20 @@
-"""Una ronda del robot (la lanza GitHub Actions cada 3 horas).
+"""El robot: revisa las búsquedas, guarda los precios y avisa por Telegram.
+
+Modos:
+    python -m buscador.run                 una sola ronda
+    python -m buscador.run --continuo 345  sin parar durante 345 minutos (GitHub Actions encadena
+                                           una sesión tras otra, así el robot nunca se detiene)
 
 Variables de entorno (secretos de GitHub):
     SUPABASE_URL, SUPABASE_SERVICE_KEY   obligatorias
     TELEGRAM_BOT_TOKEN                   para enviar avisos
     URL_WEB                              dirección de tu web (para enlazar el historial)
-    FORZAR=1                             ignora los intervalos (no los bloqueos): solo para pruebas
+    FORZAR=1                             revisa ya todas las búsquedas (no se salta los bloqueos)
 """
 
 from __future__ import annotations
 
+import argparse
 import logging
 import os
 import re
@@ -16,24 +22,46 @@ import sys
 import time
 from collections import Counter
 from datetime import date, datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
 
 from . import enlaces
-from .avisos import Telegram, codigo_en_mensaje, eur, mensaje_aviso
+from .avisos import AYUDA, MENSAJE_PRUEBA, Telegram, codigo_en_mensaje, eur, mensaje_aviso, mensaje_estado
 from .db import Supabase
 from .decision import decidir, minutos_hasta_siguiente_revision
 from .filtros import Validador, franja
 from .modelos import Opcion
 from .nucleo import consultar, crear_fuentes, evaluar
+from .tiempo import hoy as hoy_espana
 
 log = logging.getLogger("buscador")
 
-ZONA = ZoneInfo("Europe/Madrid")
-LIMITE_RONDA_S = 12 * 60  # tiempo máximo de consultas por ronda (ahorra minutos de GitHub)
+LIMITE_RONDA_S = 12 * 60  # tiempo máximo de consultas por ronda
 BLOQUEO_MAX = timedelta(hours=48)
 OPCIONES_GUARDADAS = 5
+ESPERA_ENTRE_VUELTAS_S = 60  # en modo continuo: cada minuto se mira Telegram y qué toca revisar
+MARGEN_FINAL_S = 15 * 60  # en modo continuo no se empieza una ronda si queda menos que esto
+LIMPIEZA_CADA = timedelta(hours=6)
+VERSION_DATOS = 2
+
+# Ritmo de cada web en modo continuo (minutos entre rondas). Lo que de verdad marca el ritmo es
+# cada búsqueda (cada 20-90 min, ver decision.py) y las pausas entre peticiones.
+# Se aplica una sola vez a la base de datos (VERSION_DATOS).
+RITMO_FUENTES = {
+    "google_flights": {
+        "intervalo_min": 5,
+        "descripcion": "Fuente principal: compara casi todas las aerolíneas (Ryanair, Vueling, Iberia, easyJet...). "
+        "Cada búsqueda se revisa cada 20-90 min según lo cerca que esté el viaje; 6-16 s entre peticiones.",
+    },
+    "ryanair": {
+        "intervalo_min": 30,
+        "descripcion": "Confirma el precio en la propia Ryanair. Una ronda cada 30 min como mucho; "
+        "2 min entre peticiones (el doble de lo recomendado).",
+    },
+}
 
 
+# ----------------------------------------------------------------------------------------
+# Utilidades
+# ----------------------------------------------------------------------------------------
 def _sin_urls(texto: str) -> str:
     """Quita las URLs (pueden llevar rutas, fechas o tokens) antes de escribir en el registro público."""
     return re.sub(r"https?://\S+", "<url>", str(texto))[:200]
@@ -78,36 +106,88 @@ def _aplica(fuente: str, b: dict, hoy: date) -> bool:
     return True
 
 
-def vincular_telegram(db: Supabase, tg: Telegram, perfiles: dict[str, dict]) -> int:
-    """Lee los mensajes nuevos del bot y vincula el chat que envíe el código de la web."""
-    ajuste = db.leer("ajustes", clave="eq.telegram_offset")
-    offset = ajuste[0]["valor"] if ajuste else None
+def _ajuste(db: Supabase, clave: str):
+    fila = db.leer("ajustes", clave=f"eq.{clave}")
+    return fila[0]["valor"] if fila else None
+
+
+# ----------------------------------------------------------------------------------------
+# Mantenimiento
+# ----------------------------------------------------------------------------------------
+def migrar_datos(db: Supabase) -> None:
+    """Pone al día los datos de configuración (sin tocar la estructura de la base de datos)."""
+    if int(_ajuste(db, "version_datos") or 1) >= VERSION_DATOS:
+        return
+    for fuente, valores in RITMO_FUENTES.items():
+        db.actualizar("estado_fuentes", {"fuente": f"eq.{fuente}"}, valores)
+    db.guardar("ajustes", {"clave": "version_datos", "valor": VERSION_DATOS})
+    log.info("Configuración de las webs actualizada al modo continuo (versión %s)", VERSION_DATOS)
+
+
+def limpiar_historial(db: Supabase, ahora: datetime) -> None:
+    """Las opciones no ganadoras solo sirven unos días; el historial de precios (la mejor de cada
+    revisión) se conserva entero para la gráfica."""
+    db.borrar("precios", {"es_mejor": "eq.false", "revisado": f"lt.{(ahora - timedelta(days=2)).isoformat()}"})
+    db.borrar("ejecuciones", {"inicio": f"lt.{(ahora - timedelta(days=14)).isoformat()}"})
+
+
+def escribir_latido(db: Supabase, modo: str, hasta: datetime | None) -> None:
+    """Señal de vida del robot para la web ("en directo")."""
+    db.guardar("ajustes", {"clave": "latido", "valor": {
+        "en": datetime.now(timezone.utc).isoformat(), "modo": modo, "hasta": hasta.isoformat() if hasta else None,
+    }})
+
+
+# ----------------------------------------------------------------------------------------
+# Telegram
+# ----------------------------------------------------------------------------------------
+def atender_telegram(db: Supabase, tg: Telegram, perfiles: dict[str, dict], url_web: str | None) -> int:
+    """Vincula chats con el código de la web, responde a /estado y /ayuda y envía mensajes de prueba."""
+    offset = _ajuste(db, "telegram_offset")
     codigos = {p["telegram_codigo"].upper(): p for p in perfiles.values() if p.get("telegram_codigo")}
+    por_chat = {str(p["telegram_chat_id"]): p for p in perfiles.values() if p.get("telegram_chat_id")}
     ultimo, vinculados = offset, 0
-    mensajes = tg.mensajes_nuevos(offset)
-    log.info("Telegram: %s mensaje(s) nuevo(s) para el bot", len(mensajes))
-    for m in mensajes:
+    for m in tg.mensajes_nuevos(offset):
         ultimo = m["update_id"]
         mensaje = m.get("message") or {}
         chat = (mensaje.get("chat") or {}).get("id")
-        texto = mensaje.get("text") or ""
+        texto = (mensaje.get("text") or "").strip()
+        if not chat:
+            continue
         codigo = codigo_en_mensaje(texto)
-        if chat and codigo in codigos:
+        if codigo in codigos:
             perfil = codigos.pop(codigo)
             db.actualizar("perfiles", {"id": f"eq.{perfil['id']}"}, {"telegram_chat_id": str(chat), "telegram_codigo": None})
             perfil["telegram_chat_id"] = str(chat)
-            tg.enviar(chat, "✅ ¡Listo! Este chat queda vinculado a tu Buscador de Vuelos. Aquí te llegarán los avisos.")
+            por_chat[str(chat)] = perfil
+            tg.enviar(chat, "✅ ¡Listo! Este chat queda vinculado a tu Buscador de Vuelos. Aquí te llegarán los avisos.\n\n" + AYUDA)
             vinculados += 1
-        elif chat and str(chat) in {str(p.get("telegram_chat_id")) for p in perfiles.values()}:
-            if texto.startswith("/start"):
-                tg.enviar(chat, "✅ Este chat ya está vinculado. Aquí te llegarán los avisos de tus búsquedas.")
-        elif chat and texto.startswith("/start"):
+        elif str(chat) in por_chat:
+            orden = texto.split()[0].lower() if texto else ""
+            if orden.startswith("/estado"):
+                busquedas = db.leer("busquedas", usuario=f"eq.{por_chat[str(chat)]['id']}", order="creada.desc")
+                tg.enviar(chat, mensaje_estado(busquedas, url_web))
+            elif orden.startswith("/start"):
+                tg.enviar(chat, "✅ Este chat ya está vinculado. Aquí te llegarán los avisos.\n\n" + AYUDA)
+            else:
+                tg.enviar(chat, AYUDA)
+        elif texto.startswith("/start"):
             tg.enviar(chat, "Hola 👋 Para vincular este chat envíame el código que aparece en tu web (Perfil → Telegram).")
     if ultimo != offset:
         db.guardar("ajustes", {"clave": "telegram_offset", "valor": ultimo})
+
+    # Mensajes de prueba pedidos desde la web (perfiles.telegram_prueba)
+    for p in perfiles.values():
+        if p.get("telegram_prueba") and p.get("telegram_chat_id"):
+            tg.enviar(p["telegram_chat_id"], MENSAJE_PRUEBA)
+            db.actualizar("perfiles", {"id": f"eq.{p['id']}"}, {"telegram_prueba": False})
+            p["telegram_prueba"] = False
     return vinculados
 
 
+# ----------------------------------------------------------------------------------------
+# Una búsqueda
+# ----------------------------------------------------------------------------------------
 def acumular_calendario(info: dict, nuevos: list, hoy: date, dias_validez: int = 10) -> None:
     """Guarda en info.calendario los precios vistos (chollo) y pasa el turno de fechas a la siguiente ronda."""
     acumulado = dict(info.get("calendario") or {})
@@ -159,23 +239,27 @@ def procesar_busqueda(
 ) -> bool:
     """Guarda el historial, decide si avisar y actualiza la búsqueda. Devuelve True si avisó."""
     if not validas and not rechazos and errores:
-        # Ninguna web pudo responder: no es que no haya vuelos. Se reintenta en la siguiente ronda.
+        # Ninguna web pudo responder: no es que no haya vuelos. Se reintenta pronto.
         db.actualizar("busquedas", {"id": f"eq.{b['id']}"}, {
             "ultima_revision": ahora.isoformat(),
-            "proxima_revision": (ahora + timedelta(minutes=170)).isoformat(),
+            "proxima_revision": (ahora + timedelta(minutes=20)).isoformat(),
             "estado": "No se pudo consultar en esta ronda: " + _sin_urls(errores[0])[:150],
         })
         return False
-    filtros_historial = {"busqueda": f"eq.{b['id']}", "es_mejor": "eq.true", "select": "precio_total",
-                         "order": "revisado.asc", "limit": 500}
+
+    filtros_historial = {"busqueda": f"eq.{b['id']}", "es_mejor": "eq.true", "select": "precio_total,revisado",
+                         "order": "revisado.asc", "limit": 5000}
     if b.get("historial_desde"):  # tras editar el viaje, el historial anterior no se compara
         filtros_historial["revisado"] = f"gte.{b['historial_desde']}"
-    historial = [float(p["precio_total"]) for p in db.leer("precios", **filtros_historial)]
+    puntos = db.leer("precios", **filtros_historial)
+    historial = [float(p["precio_total"]) for p in puntos]
+    horas = (ahora - _fecha_hora(puntos[0]["revisado"])).total_seconds() / 3600 if puntos else 0.0
+
     if validas:
         db.insertar("precios", [_fila_precio(b, op, i == 0, aerolineas) for i, op in enumerate(validas[:OPCIONES_GUARDADAS])])
 
     mejor = validas[0] if validas else None
-    decision = decidir(b, mejor, historial, calendario, hoy)
+    decision = decidir(b, mejor, historial, calendario, hoy, horas_historial=horas)
 
     info = dict(b.get("info") or {})
     info["opciones_validas"] = len(validas)
@@ -183,6 +267,8 @@ def procesar_busqueda(
     info["fuentes"] = fuentes_usadas
     if "habitual" in decision.contexto:
         info["habitual"] = decision.contexto["habitual"]
+    if mejor and historial:
+        info["variacion"] = round(mejor.precio_total - historial[-1], 2)  # respecto a la revisión anterior
     cambios = {
         "ultima_revision": ahora.isoformat(),
         "proxima_revision": (ahora + timedelta(minutes=minutos_hasta_siguiente_revision(b, hoy))).isoformat(),
@@ -223,144 +309,182 @@ def procesar_busqueda(
     return avisado
 
 
-def main() -> int:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    # httpx registra cada URL pedida (rutas, fechas...): no debe aparecer en registros públicos
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    # fli escribe fechas de viaje en sus avisos; los fallos ya se resumen sin datos personales
-    logging.getLogger("fli").setLevel(logging.ERROR)
-    url, clave = os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_SERVICE_KEY")
-    # Diagnóstico sin revelar nada: solo si cada dato de configuración existe o no
-    hay = lambda nombre: "sí" if os.environ.get(nombre) else "NO"
-    log.info(
-        "Configuración: SUPABASE_URL=%s · SUPABASE_SERVICE_KEY=%s · TELEGRAM_BOT_TOKEN=%s · URL_WEB=%s",
-        hay("SUPABASE_URL"), hay("SUPABASE_SERVICE_KEY"), hay("TELEGRAM_BOT_TOKEN"), hay("URL_WEB"),
-    )
-    if not url or not clave:
-        # Sin configurar todavía: se avisa en el registro pero no se marca como fallo
-        log.warning("Faltan SUPABASE_URL y/o SUPABASE_SERVICE_KEY (secretos del repositorio en GitHub). Nada que hacer.")
-        return 0
-    token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    url_web = os.environ.get("URL_WEB") or None
-    forzar = os.environ.get("FORZAR", "").lower() in ("1", "true", "si", "sí")
-
-    db = Supabase(url, clave)
-    t0 = time.monotonic()
+# ----------------------------------------------------------------------------------------
+# Una ronda
+# ----------------------------------------------------------------------------------------
+def ronda(db: Supabase, tg: Telegram | None, url_web: str | None, forzar: bool, limite_s: float) -> dict | None:
+    """Revisa las búsquedas a las que les toca. Devuelve el resumen, o None si no había nada que hacer."""
     ahora = datetime.now(timezone.utc)
-    hoy = datetime.now(ZONA).date()
+    hoy = hoy_espana()
+    pendientes = []
+    for b in db.leer("busquedas", activa="eq.true"):
+        if _caducada(b, hoy):
+            db.actualizar("busquedas", {"id": f"eq.{b['id']}"}, {"activa": False, "estado": "Caducada: las fechas ya han pasado"})
+            continue
+        if forzar or _fecha_hora(b["proxima_revision"]) <= ahora:
+            pendientes.append(b)
+    if not pendientes:
+        return None
+    pendientes.sort(key=lambda b: str(b.get("fecha_ida") or b.get("chollo_desde")))  # primero los viajes cercanos
+
+    config = {f["fuente"]: f for f in db.leer("estado_fuentes")}
+    listas = []
+    for nombre, cfg in config.items():
+        bloqueada = _fecha_hora(cfg.get("bloqueada_hasta"))
+        ultima = _fecha_hora(cfg.get("ultima_ronda"))
+        if not cfg["activa"] or (bloqueada and bloqueada > ahora):
+            continue
+        if not forzar and ultima and ahora - ultima < timedelta(minutes=cfg["intervalo_min"]):
+            continue
+        listas.append(nombre)
+    if not listas:
+        return None
+
+    t0 = time.monotonic()
     ejecucion = db.insertar("ejecuciones", {"inicio": ahora.isoformat()}, devolver=True)[0]
-    resumen: dict = {"forzada": forzar, "avisos": 0, "revisadas": 0, "errores": []}
-    codigo_salida = 0
+    resumen: dict = {"forzada": forzar, "avisos": 0, "revisadas": 0, "errores": [],
+                     "pendientes": len(pendientes), "fuentes_en_ronda": listas}
     try:
         aerolineas = {a["codigo"]: a for a in db.leer("aerolineas")}
         perfiles = {p["id"]: p for p in db.leer("perfiles")}
-        config = {f["fuente"]: f for f in db.leer("estado_fuentes")}
+        fuentes = crear_fuentes(listas, config, aerolineas)
+        tareas = {n: [b for b in pendientes if _aplica(n, b, hoy)] for n in fuentes}
+        # Ryanair tiene un máximo de peticiones por ronda: primero las que hace más tiempo que no mira
+        if "ryanair" in tareas:
+            tareas["ryanair"].sort(key=lambda b: (b.get("info") or {}).get("ryanair_ultima", ""))
+        validadores = {b["id"]: Validador(b, aerolineas) for b in pendientes}
+        resultados, estado = consultar(fuentes, tareas, validadores, config, limite_s)
+        _registrar_fuentes(estado, resultados)
+        resumen["fuentes"] = estado
 
-        log.info("Supabase: conexión correcta · %s perfil(es), %s con Telegram vinculado, %s con código pendiente",
-                 len(perfiles), sum(1 for p in perfiles.values() if p.get("telegram_chat_id")),
-                 sum(1 for p in perfiles.values() if p.get("telegram_codigo")))
-        tg = Telegram(token) if token else None
-        if tg and not tg.token_valido():
-            resumen["errores"].append("El token de Telegram no es válido: revisa el secreto TELEGRAM_BOT_TOKEN")
-            tg = None
-        if tg:
-            resumen["telegram_vinculados"] = vincular_telegram(db, tg, perfiles)
-            log.info("Telegram: token válido · %s chat(s) vinculado(s) en esta ronda", resumen["telegram_vinculados"])
-        else:
-            resumen["errores"].append("Sin TELEGRAM_BOT_TOKEN válido: no se envían avisos")
-            log.warning("Telegram: sin token válido, no se pueden enviar avisos")
+        for nombre, est in estado.items():
+            cfg = config[nombre]
+            cambios = {"ultima_ronda": ahora.isoformat()}
+            if est["bloqueo"]:
+                seguidos = cfg["bloqueos_seguidos"] + 1
+                # Al menos 30 min de descanso, y el doble con cada bloqueo seguido (máximo 48 h)
+                espera = min(timedelta(minutes=max(cfg["intervalo_min"], 30) * 2**seguidos), BLOQUEO_MAX)
+                cambios.update(bloqueos_seguidos=seguidos, bloqueada_hasta=(ahora + espera).isoformat(), ultimo_error=est["bloqueo"])
+            else:
+                cambios.update(bloqueos_seguidos=0, bloqueada_hasta=None, ultima_ok=ahora.isoformat(),
+                               ultimo_error=est["errores"][-1] if est["errores"] else None)
+            db.actualizar("estado_fuentes", {"fuente": f"eq.{nombre}"}, cambios)
 
-        pendientes = []
-        for b in db.leer("busquedas", activa="eq.true"):
-            if _caducada(b, hoy):
-                db.actualizar("busquedas", {"id": f"eq.{b['id']}"}, {"activa": False, "estado": "Caducada: las fechas ya han pasado"})
+        for b in pendientes:
+            por_fuente = resultados.get(b["id"], {})
+            if not por_fuente:
+                db.actualizar("busquedas", {"id": f"eq.{b['id']}"},
+                              {"estado": "Pendiente: no dio tiempo en esta ronda, se revisará en la siguiente"})
                 continue
-            if forzar or _fecha_hora(b["proxima_revision"]) <= ahora:
-                pendientes.append(b)
-        # Primero los viajes más cercanos
-        pendientes.sort(key=lambda b: str(b.get("fecha_ida") or b.get("chollo_desde")))
-        resumen["pendientes"] = len(pendientes)
-
-        listas = []
-        for nombre, cfg in config.items():
-            bloqueada = _fecha_hora(cfg.get("bloqueada_hasta"))
-            ultima = _fecha_hora(cfg.get("ultima_ronda"))
-            if not cfg["activa"] or (bloqueada and bloqueada > ahora):
-                continue
-            if not forzar and ultima and ahora - ultima < timedelta(minutes=cfg["intervalo_min"]):
-                continue
-            listas.append(nombre)
-        resumen["fuentes_en_ronda"] = listas
-
-        if pendientes and listas:
-            fuentes = crear_fuentes(listas, config, aerolineas)
-            tareas = {n: [b for b in pendientes if _aplica(n, b, hoy)] for n in fuentes}
-            # Ryanair tiene un máximo de peticiones por ronda: primero las que hace más tiempo que no mira
-            if "ryanair" in tareas:
-                tareas["ryanair"].sort(key=lambda b: (b.get("info") or {}).get("ryanair_ultima", ""))
-            validadores = {b["id"]: Validador(b, aerolineas) for b in pendientes}
-            resultados, estado = consultar(fuentes, tareas, validadores, config, LIMITE_RONDA_S)
-            _registrar_fuentes(estado, resultados)
-            resumen["fuentes"] = estado
-
-            for nombre, est in estado.items():
-                cfg = config[nombre]
-                cambios = {"ultima_ronda": ahora.isoformat()}
-                if est["bloqueo"]:
-                    seguidos = cfg["bloqueos_seguidos"] + 1
-                    espera = min(timedelta(minutes=cfg["intervalo_min"] * 2**seguidos), BLOQUEO_MAX)
-                    cambios.update(bloqueos_seguidos=seguidos, bloqueada_hasta=(ahora + espera).isoformat(), ultimo_error=est["bloqueo"])
-                else:
-                    cambios.update(bloqueos_seguidos=0, bloqueada_hasta=None, ultima_ok=ahora.isoformat(),
-                                   ultimo_error=est["errores"][-1] if est["errores"] else None)
-                db.actualizar("estado_fuentes", {"fuente": f"eq.{nombre}"}, cambios)
-
-            for b in pendientes:
-                por_fuente = resultados.get(b["id"], {})
-                if not por_fuente:
-                    db.actualizar("busquedas", {"id": f"eq.{b['id']}"},
-                                  {"estado": "Pendiente: no dio tiempo en esta ronda, se revisará en la siguiente"})
-                    continue
-                info = dict(b.get("info") or {})
-                if "ryanair" in por_fuente:
-                    info["ryanair_ultima"] = ahora.isoformat()
-                    r = por_fuente["ryanair"]
-                    # Sin tarifas en una consulta real y sin franjas horarias: Ryanair no vuela esa ruta
-                    # (con franjas, o fechas sin vuelo ese día, la respuesta también sale vacía)
-                    if r.peticiones and not r.opciones and not r.error and not _tiene_franjas(b):
-                        info["ryanair_sin_ruta_hasta"] = (hoy + timedelta(days=3)).isoformat()
-                if b["modo"] == "chollo" and "google_flights" in por_fuente:
-                    acumular_calendario(info, por_fuente["google_flights"].calendario, hoy)
-                b["info"] = info
-                try:
-                    validas, rechazos, calendario = evaluar(b, por_fuente, perfiles.get(b["usuario"]), aerolineas)
-                    if b["modo"] == "chollo":
-                        # Lo "normal" de la ruta se calcula con todo lo visto en los últimos días
-                        calendario = [precio for precio, _visto in (info.get("calendario") or {}).values()]
-                    log.info("Búsqueda %s…: %s opción(es) válida(s); descartadas: %s",
-                             b["id"][:8], len(validas), dict(rechazos) or "ninguna")
-                    errores_busqueda = [r.error for r in por_fuente.values() if r.error and not r.opciones]
-                    if procesar_busqueda(db, b, validas, rechazos, calendario, list(por_fuente), perfiles.get(b["usuario"]),
-                                         aerolineas, tg, url_web, hoy, ahora, errores_busqueda):
-                        resumen["avisos"] += 1
-                    resumen["revisadas"] += 1
-                except Exception as e:
-                    log.error("Error procesando la búsqueda %s…: %s", b["id"][:8], type(e).__name__)
-                    resumen["errores"].append(f"{b.get('nombre')}: {type(e).__name__}: {e}"[:300])
+            info = dict(b.get("info") or {})
+            if "ryanair" in por_fuente:
+                info["ryanair_ultima"] = ahora.isoformat()
+                r = por_fuente["ryanair"]
+                # Sin tarifas en una consulta real y sin franjas horarias: Ryanair no vuela esa ruta
+                # (con franjas, o fechas sin vuelo ese día, la respuesta también sale vacía)
+                if r.peticiones and not r.opciones and not r.error and not _tiene_franjas(b):
+                    info["ryanair_sin_ruta_hasta"] = (hoy + timedelta(days=3)).isoformat()
+            if b["modo"] == "chollo" and "google_flights" in por_fuente:
+                acumular_calendario(info, por_fuente["google_flights"].calendario, hoy)
+            b["info"] = info
+            try:
+                validas, rechazos, calendario = evaluar(b, por_fuente, perfiles.get(b["usuario"]), aerolineas)
+                if b["modo"] == "chollo":
+                    # Lo "normal" de la ruta se calcula con todo lo visto en los últimos días
+                    calendario = [precio for precio, _visto in (info.get("calendario") or {}).values()]
+                log.info("Búsqueda %s…: %s opción(es) válida(s); descartadas: %s",
+                         b["id"][:8], len(validas), dict(rechazos) or "ninguna")
+                errores = [r.error for r in por_fuente.values() if r.error and not r.opciones]
+                if procesar_busqueda(db, b, validas, rechazos, calendario, list(por_fuente), perfiles.get(b["usuario"]),
+                                     aerolineas, tg, url_web, hoy, ahora, errores):
+                    resumen["avisos"] += 1
+                resumen["revisadas"] += 1
+            except Exception as e:
+                log.error("Error procesando la búsqueda %s…: %s", b["id"][:8], type(e).__name__)
+                resumen["errores"].append(f"{b.get('nombre')}: {type(e).__name__}: {e}"[:300])
     except Exception as e:
-        log.error("Fallo general de la ronda: %s", type(e).__name__)
-        resumen["errores"].append(f"Fallo general: {type(e).__name__}: {e}"[:500])
-        codigo_salida = 1
+        log.error("Fallo en la ronda: %s", type(e).__name__)
+        resumen["errores"].append(f"Fallo en la ronda: {type(e).__name__}: {e}"[:500])
     finally:
         duracion = int(time.monotonic() - t0)
         db.actualizar("ejecuciones", {"id": f"eq.{ejecucion['id']}"},
                       {"fin": datetime.now(timezone.utc).isoformat(), "duracion_s": duracion, "resumen": resumen})
         # Solo números en el registro: si el repositorio es público, cualquiera puede leerlo.
-        # El detalle (con nombres de búsquedas y errores) se guarda en Supabase, que es privado.
-        log.info(
-            "Ronda terminada en %s s: %s revisadas, %s avisos, %s incidencias",
-            duracion, resumen.get("revisadas", 0), resumen.get("avisos", 0), len(resumen.get("errores", [])),
-        )
+        log.info("Ronda terminada en %s s: %s revisadas, %s avisos, %s incidencias",
+                 duracion, resumen["revisadas"], resumen["avisos"], len(resumen["errores"]))
+    return resumen
+
+
+# ----------------------------------------------------------------------------------------
+# Programa
+# ----------------------------------------------------------------------------------------
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Robot del Buscador de Vuelos")
+    parser.add_argument("--continuo", type=float, metavar="MINUTOS", help="funcionar sin parar durante estos minutos")
+    args = parser.parse_args(argv)
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    # httpx registra cada URL pedida (rutas, fechas...) y fli escribe fechas de viaje en sus avisos:
+    # no deben aparecer en registros públicos (los fallos ya se resumen sin datos personales)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("fli").setLevel(logging.ERROR)
+
+    url, clave = os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_SERVICE_KEY")
+    hay = lambda nombre: "sí" if os.environ.get(nombre) else "NO"  # nunca se escribe el valor
+    log.info("Configuración: SUPABASE_URL=%s · SUPABASE_SERVICE_KEY=%s · TELEGRAM_BOT_TOKEN=%s · URL_WEB=%s",
+             hay("SUPABASE_URL"), hay("SUPABASE_SERVICE_KEY"), hay("TELEGRAM_BOT_TOKEN"), hay("URL_WEB"))
+    if not url or not clave:
+        log.warning("Faltan SUPABASE_URL y/o SUPABASE_SERVICE_KEY (secretos del repositorio en GitHub). Nada que hacer.")
+        return 0
+    url_web = os.environ.get("URL_WEB") or None
+    forzar = os.environ.get("FORZAR", "").lower() in ("1", "true", "si", "sí")
+
+    db = Supabase(url, clave)
+    inicio = time.monotonic()
+    fin = inicio + args.continuo * 60 if args.continuo else None
+    hasta = datetime.now(timezone.utc) + timedelta(minutes=args.continuo) if args.continuo else None
+
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    tg = Telegram(token) if token else None
+    if tg and not tg.token_valido():
+        log.warning("Telegram: el token no es válido, revisa el secreto TELEGRAM_BOT_TOKEN")
+        tg = None
+    log.info("Telegram: %s", "token válido" if tg else "sin token válido, no se pueden enviar avisos")
+
+    try:
+        migrar_datos(db)
+    except Exception as e:
+        log.warning("No se pudo actualizar la configuración: %s", type(e).__name__)
+
+    ultima_limpieza = None
+    codigo_salida = 0
+    while True:
+        ahora = datetime.now(timezone.utc)
+        try:
+            if ultima_limpieza is None or ahora - ultima_limpieza > LIMPIEZA_CADA:
+                limpiar_historial(db, ahora)
+                ultima_limpieza = ahora
+            escribir_latido(db, "continuo" if fin else "ronda", hasta)
+            if tg:
+                perfiles = {p["id"]: p for p in db.leer("perfiles")}
+                if atender_telegram(db, tg, perfiles, url_web):
+                    log.info("Telegram: chat vinculado")
+            restante = fin - time.monotonic() if fin else None
+            if restante is None:
+                ronda(db, tg, url_web, forzar, LIMITE_RONDA_S)
+            elif restante > MARGEN_FINAL_S:
+                ronda(db, tg, url_web, forzar, min(LIMITE_RONDA_S, restante - MARGEN_FINAL_S / 2))
+            forzar = False  # solo la primera vuelta revisa todo
+        except Exception as e:
+            # Un fallo puntual (red, Supabase...) no detiene el robot continuo: se reintenta en la siguiente vuelta
+            log.error("Fallo en esta vuelta: %s: %s", type(e).__name__, _sin_urls(e))
+            if not fin:
+                codigo_salida = 1
+        if not fin or time.monotonic() + ESPERA_ENTRE_VUELTAS_S >= fin:
+            break
+        time.sleep(ESPERA_ENTRE_VUELTAS_S)
+
+    log.info("Robot detenido tras %s min", round((time.monotonic() - inicio) / 60))
     return codigo_salida
 
 

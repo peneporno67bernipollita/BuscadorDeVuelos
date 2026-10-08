@@ -1,10 +1,11 @@
 name: Robot de vuelos
 
+# El robot funciona sin parar: cada sesión dura casi 6 horas (el máximo de GitHub) y, al
+# terminar, lanza la siguiente. La programación de cada 2 horas solo es un respaldo por si
+# la cadena se corta (si ya hay una sesión en marcha, la nueva espera y no se duplica).
 on:
   schedule:
-    # Cada 3 horas, en el minuto 17 (las horas en punto van más saturadas en GitHub).
-    # Cada web tiene además su propio intervalo mínimo (+20 min de margen) en la base de datos.
-    - cron: "17 */3 * * *"
+    - cron: "23 */2 * * *"
   workflow_dispatch:
     inputs:
       forzar:
@@ -12,21 +13,24 @@ on:
         type: boolean
         default: true
 
-# Nunca dos rondas a la vez
+# Nunca dos sesiones a la vez
 concurrency:
   group: robot-vuelos
   cancel-in-progress: false
 
 jobs:
-  ronda:
-    # No se ejecuta hasta que configures la variable URL_WEB (docs/INSTALACION.md, paso 6):
-    # así no gasta minutos ni manda correos de error mientras falta la configuración.
+  robot:
+    # No se ejecuta hasta que configures la variable URL_WEB (docs/INSTALACION.md, paso 6)
     if: ${{ vars.URL_WEB != '' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 355
     permissions:
-      contents: write  # solo para el paso "Mantener activas las rondas automáticas"
+      contents: write  # para "Mantener activas las rondas programadas"
+      actions: write   # para lanzar la siguiente sesión
     steps:
+      - name: Anotar la hora de inicio
+        run: echo "INICIO_SESION=$(date +%s)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v7
@@ -42,7 +46,7 @@ jobs:
         working-directory: worker
         run: python -m pytest -q tests
 
-      - name: Buscar vuelos
+      - name: Buscar vuelos (sin parar ~5 h 45 min)
         working-directory: worker
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -50,18 +54,34 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           URL_WEB: ${{ vars.URL_WEB }}
           FORZAR: ${{ inputs.forzar && '1' || '' }}
-        run: python -m buscador.run
+        run: python -m buscador.run --continuo 345
 
-      # En un repositorio público, GitHub desactiva las rondas automáticas tras 60 días sin
-      # actividad. Si el último cambio tiene más de 50 días, se sube un commit vacío.
-      - name: Mantener activas las rondas automáticas
-        if: ${{ !cancelled() && github.event_name == 'schedule' }}
+      # En un repositorio público, GitHub desactiva la programación tras 60 días sin cambios.
+      # Si el último cambio tiene más de 50 días, se sube un commit vacío.
+      - name: Mantener activas las rondas programadas
+        if: ${{ !cancelled() }}
         run: |
           dias=$(( ( $(date +%s) - $(git log -1 --format=%ct) ) / 86400 ))
           echo "Último cambio hace $dias días"
           if [ "$dias" -ge 50 ]; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git commit --allow-empty -m "Mantener activas las rondas automáticas del robot"
+            git commit --allow-empty -m "Mantener activas las rondas programadas del robot"
             git push
+          fi
+
+      # Encadenar la siguiente sesión. Solo si esta ha durado al menos 30 min: si algo falla
+      # nada más arrancar, no se entra en un bucle de sesiones fallidas (el respaldo de cada
+      # 2 horas lo volverá a intentar).
+      - name: Lanzar la siguiente sesión
+        if: ${{ !cancelled() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          duracion=$(( $(date +%s) - INICIO_SESION ))
+          echo "Esta sesión ha durado $(( duracion / 60 )) min"
+          if [ "$duracion" -ge 1800 ]; then
+            gh workflow run robot.yml --repo "${{ github.repository }}" --ref "${{ github.ref_name }}" -f forzar=false
+          else
+            echo "Sesión demasiado corta: no se encadena (se reintentará con la programación)."
           fi

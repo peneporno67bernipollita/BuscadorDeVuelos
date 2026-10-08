@@ -22,6 +22,10 @@ DIAS_VIAJE_PROXIMO = 21  # menos de 3 semanas: avisar ya con lo mejor que haya
 DIAS_AVISO_FINAL = 24  # último aviso antes de entrar en las 3 últimas semanas
 BAJADA_MINIMA_PCT = 0.05  # volver a avisar si baja al menos un 5 %...
 BAJADA_MINIMA_EUR = 10.0  # ...o al menos 10 €
+# Con revisiones cada pocos minutos, un "mínimo" de la última hora no dice nada:
+# para darlo por bueno hace falta haber observado el precio durante un tiempo.
+HORAS_PARA_MINIMO = 6
+HORAS_PARA_CHOLLO_ANTICIPADO = 24
 
 
 @dataclass
@@ -55,9 +59,11 @@ def decidir(
     historial: list[float],
     calendario: list[float],
     hoy: date,
+    horas_historial: float = 0.0,
 ) -> Decision:
     """historial: mejores totales de revisiones anteriores (antiguo → reciente).
-    calendario: precios de billetes (sin maletas) de fechas cercanas o del rango del chollo."""
+    calendario: precios de billetes (sin maletas) de fechas cercanas o del rango del chollo.
+    horas_historial: cuántas horas abarca el historial (de la primera revisión a la última)."""
     contexto: dict = {}
     if historial:
         contexto["minimo_visto"] = min(historial)
@@ -119,7 +125,7 @@ def decidir(
                     f"normal de esta ruta en tus fechas (mediana {_eur(mediana)}).",
                     contexto=contexto,
                 )
-        if len(historial) >= 4 and total <= median(historial) * 0.80:
+        if len(historial) >= 4 and horas_historial >= HORAS_PARA_MINIMO and total <= median(historial) * 0.80:
             return Decision(
                 True, "chollo", "🔥 ¡Chollo encontrado!",
                 f"{_eur(total)}: un 20 % por debajo de lo que he visto hasta ahora en esta ruta.",
@@ -148,10 +154,10 @@ def decidir(
     minimo = min(historial) if historial else None
 
     if dias <= fin_ventana:
-        if len(historial) >= 2 and total <= minimo:
+        if len(historial) >= 2 and horas_historial >= HORAS_PARA_MINIMO and total <= minimo:
             return Decision(
                 True, "buen_momento", "✅ Buen momento para comprar",
-                f"Es el precio más bajo desde que vigilo esta búsqueda y estás en la ventana en la que "
+                f"Es el precio más bajo de las últimas {round(horas_historial)} h de vigilancia y estás en la ventana en la que "
                 f"los vuelos suelen estar más baratos ({dias} días antes).",
                 contexto=contexto,
             )
@@ -165,7 +171,7 @@ def decidir(
         return Decision(False, contexto=contexto)
 
     # Todavía es pronto: solo se avisa si es algo excepcional
-    if len(historial) >= 6 and total <= median(historial) * 0.80:
+    if len(historial) >= 6 and horas_historial >= HORAS_PARA_CHOLLO_ANTICIPADO and total <= median(historial) * 0.80:
         return Decision(
             True, "chollo", "🔥 Chollo anticipado",
             f"Aún es pronto ({dias} días), pero {_eur(total)} está un 20 % por debajo de lo que he visto.",
@@ -181,13 +187,22 @@ def decidir(
     return Decision(False, contexto=contexto)
 
 
+# Cada cuántos minutos se revisa una búsqueda (el robot funciona sin parar).
+# Las aerolíneas cambian precios varias veces al día: revisar más a menudo no aporta más
+# información y solo haría que Google bloquease al robot.
+REVISION_PROXIMO_MIN = 20  # viaje en menos de 3 semanas
+REVISION_MEDIO_MIN = 40  # viaje en menos de 2 meses
+REVISION_LEJANO_MIN = 90  # viaje en más de 2 meses
+REVISION_CHOLLO_MIN = 60  # chollo (cada revisión mira 8 fechas)
+
+
 def minutos_hasta_siguiente_revision(busqueda: dict, hoy: date) -> int:
-    """Cuanto más cerca está el viaje, más a menudo se revisa (el robot pasa cada 3 h)."""
+    """Cuanto más cerca está el viaje, más a menudo se revisa."""
     if busqueda["modo"] != "fechas":
-        return 710
+        return REVISION_CHOLLO_MIN
     dias = (date.fromisoformat(str(busqueda["fecha_ida"])) - hoy).days
     if dias <= DIAS_VIAJE_PROXIMO:
-        return 170
+        return REVISION_PROXIMO_MIN
     if dias <= 60:
-        return 350
-    return 710
+        return REVISION_MEDIO_MIN
+    return REVISION_LEJANO_MIN

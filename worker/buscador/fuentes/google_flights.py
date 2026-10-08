@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import os
 import random
+import re
 import threading
 import time
 from datetime import date, timedelta
@@ -37,6 +38,7 @@ from fli.search._concurrency import TokenBucketRateLimiter
 from fli.search.client import get_client
 
 from .. import filtros
+from ..tiempo import hoy
 from ..modelos import FuenteBloqueada, Opcion, PrecioCalendario, ResultadoFuente, Tramo, Trayecto
 
 log = logging.getLogger(__name__)
@@ -69,9 +71,15 @@ def _a_trayecto(resultado) -> Trayecto:
     )
 
 
+PATRON_BLOQUEO = r"\b(403|429)\b"  # código HTTP suelto, no dentro de otro número
+
+
 def _es_bloqueo(error: Exception) -> bool:
+    """Error HTTP 403/429 o mensaje de tráfico inusual (sin confundir otros números del texto)."""
     texto = str(error).lower()
-    return any(s in texto for s in ("429", "403", "unusual traffic", "captcha", "too many requests"))
+    return bool(re.search(PATRON_BLOQUEO, texto)) or any(
+        s in texto for s in ("unusual traffic", "too many requests", "forbidden")
+    )
 
 
 def describir_respuesta(estado: int, cuerpo: str) -> str:
@@ -100,7 +108,6 @@ class GoogleFlights:
         # Nunca más de una petición cada pausa_min segundos (también en las internas de la librería)
         get_client()._rate_limiter = TokenBucketRateLimiter(calls=1, period=float(pausa_min_s))
         self.incluir = [a for c in sorted(codigos_permitidos) if (a := self._aerolinea(c))]
-        self.peticiones = 0
         self._primera = True
         self.respuestas: list[str] = []  # clasificación de cada respuesta de Google (diagnóstico)
         self._vigilar_respuestas()
@@ -118,6 +125,11 @@ class GoogleFlights:
 
             setattr(cliente, metodo, vigilado.__get__(cliente))
 
+    @property
+    def peticiones(self) -> int:
+        """Peticiones HTTP reales hechas a Google (cada respuesta recibida)."""
+        return len(self.respuestas)
+
     @staticmethod
     def _aerolinea(codigo: str):
         for nombre in (codigo, "_" + codigo):
@@ -130,9 +142,8 @@ class GoogleFlights:
             time.sleep(random.uniform(*self.pausa))
         self._primera = False
 
-    def _llamar(self, funcion, *args, peticiones: int = 1, **kwargs):
+    def _llamar(self, funcion, *args, **kwargs):
         self._pausa()
-        self.peticiones += peticiones
         try:
             return funcion(*args, **kwargs, **LOCALE)
         except Exception as e:  # la librería lanza excepciones genéricas
@@ -187,9 +198,9 @@ class GoogleFlights:
     # ------------------------------------------------------------------
     def calendario(self, b: dict, desde: date, hasta: date, noches: int | None) -> list[PrecioCalendario]:
         """Precio más barato (solo billetes) de cada fecha del rango, con una o pocas peticiones."""
-        manana = date.today() + timedelta(days=1)
+        manana = hoy() + timedelta(days=1)
         desde = max(desde, manana)
-        hasta = min(hasta, date.today() + timedelta(days=MAX_DIAS_FUTURO))
+        hasta = min(hasta, hoy() + timedelta(days=MAX_DIAS_FUTURO))
         if hasta < desde:
             return []
         # Sin franjas horarias: con ellas el calendario de Google devuelve un solo día (como con la
@@ -209,8 +220,7 @@ class GoogleFlights:
             duration=noches,
             **comunes,
         )
-        trozos = (hasta - desde).days // SearchDates.MAX_DAYS_PER_SEARCH + 1
-        res = self._llamar(SearchDates().search, filtros_fechas, peticiones=trozos) or []
+        res = self._llamar(SearchDates().search, filtros_fechas) or []
         return [
             PrecioCalendario(r.date[0].date(), r.date[1].date() if len(r.date) > 1 else None, float(r.price))
             for r in res
@@ -237,7 +247,7 @@ class GoogleFlights:
         )
         opciones: list[Opcion] = []
         # top_n=2: se piden las vueltas de las 2 idas más baratas (3 peticiones)
-        for combo in self._llamar(SearchFlights().search, f, top_n=top_n, peticiones=top_n + 1) or []:
+        for combo in self._llamar(SearchFlights().search, f, top_n=top_n) or []:
             ida, vuelta = combo[0], combo[-1]
             if vuelta.price is None or ida.self_transfer or vuelta.self_transfer:
                 continue
@@ -320,9 +330,9 @@ class GoogleFlights:
         así que no se pide el periodo completo: cada ronda mira unas pocas fechas repartidas y la
         siguiente desplaza la selección (info.chollo_turno), hasta cubrirlo todo en pocos días.
         """
-        manana = date.today() + timedelta(days=1)
+        manana = hoy() + timedelta(days=1)
         desde = max(date.fromisoformat(str(b["chollo_desde"])), manana)
-        hasta = min(date.fromisoformat(str(b["chollo_hasta"])), date.today() + timedelta(days=MAX_DIAS_FUTURO))
+        hasta = min(date.fromisoformat(str(b["chollo_hasta"])), hoy() + timedelta(days=MAX_DIAS_FUTURO))
         noches_posibles = [None]
         if b.get("ida_vuelta"):
             n_min, n_max = b["noches_min"], b["noches_max"]
@@ -364,7 +374,6 @@ class GoogleFlights:
 
     def buscar(self, b: dict, validador: filtros.Validador) -> ResultadoFuente:
         self.nueva_sesion_privada()
-        antes = self.peticiones
         primera_respuesta = len(self.respuestas)
         res = ResultadoFuente()
         if b["modo"] == "fechas":
@@ -399,15 +408,15 @@ class GoogleFlights:
             # Lo más barato entre lo visto ahora y lo acumulado en rondas anteriores
             vistos = {(c.fecha_ida, c.fecha_vuelta): c.precio for c in calendario_guardado(b)}
             vistos.update({(c.fecha_ida, c.fecha_vuelta): c.precio for c in res.calendario})
-            futuros = [(precio, par) for par, precio in vistos.items() if par[0] > date.today()]
+            futuros = [(precio, par) for par, precio in vistos.items() if par[0] > hoy()]
             pares = [min(futuros, key=lambda x: x[0])[1]] if futuros else []
 
-        hoy = date.today()
+        dia = hoy()
         for fi, fv in pares:
-            if fi < hoy:
+            if fi < dia:
                 continue
             res.opciones += self.vuelos(b, fi, fv, validador)
-        res.peticiones = self.peticiones - antes
+        res.peticiones = len(self.respuestas) - primera_respuesta
 
         recientes = self.respuestas[primera_respuesta:]
         if any(r.startswith("bloqueo") for r in recientes):
