@@ -53,7 +53,7 @@ function botonesComprar(p, { grande = false } = {}) {
       `<a class="${clase}" href="${esc(e.url)}" target="_blank" rel="noopener">${icono("etiqueta")}${esc(e.texto)}</a>`).join("");
   }
   return d.google_flights
-    ? `<a class="${clase}" href="${esc(d.google_flights)}" target="_blank" rel="noopener">${icono("etiqueta")}Comprar en Google Flights</a>` : "";
+    ? `<a class="${clase}" href="${esc(d.google_flights)}" target="_blank" rel="noopener">${icono("etiqueta")}Ver en Google Flights</a>` : "";
 }
 
 function tarjetaVuelo(p, aerolineas, esMejor) {
@@ -78,7 +78,7 @@ function tarjetaVuelo(p, aerolineas, esMejor) {
           ${(d.notas || []).map((n) => `<span class="tenue">${esc(n)}</span>`).join("")}
         </div>
         <div class="acciones">${botonesComprar(p)}${enlaces}
-          ${d.google_flights && d.comprar?.length ? `<a class="boton pequeno fantasma" href="${esc(d.google_flights)}" target="_blank" rel="noopener">${icono("lupa")}Ver otras opciones</a>` : ""}</div>
+          ${d.google_flights && d.comprar?.length ? `<a class="boton pequeno fantasma" href="${esc(d.google_flights)}" target="_blank" rel="noopener">${icono("lupa")}Ver los más baratos</a>` : ""}</div>
       </div>
     </div>`;
 }

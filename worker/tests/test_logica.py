@@ -273,3 +273,9 @@ def test_enlaces_comprar_ya_en_google_flights():
     separados = opcion_directa()
     separados.billetes_separados = True
     assert [e["texto"] for e in comprar_ya(busqueda(), separados)] == ["Comprar la ida", "Comprar la vuelta"]
+
+
+def test_enlace_google_abre_en_los_mas_bajos():
+    from buscador.enlaces import google_flights
+    url = google_flights(busqueda(), opcion_directa())
+    assert url.startswith("https://www.google.com/travel/flights/search?tfs=") and "tfu=EgoIABAAGAAgAigB" in url

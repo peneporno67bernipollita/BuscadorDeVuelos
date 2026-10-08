@@ -31,8 +31,32 @@ def _ryanair(busqueda: dict, ida: Trayecto, vuelta: Trayecto | None) -> str:
     return "https://www.ryanair.com/es/es/trip/flights/select?" + urlencode(params)
 
 
+# Pestaña "Los más bajos" de Google Flights (sin esto se abre en "Mejores opciones")
+PESTANA_MAS_BAJOS = "EgoIABAAGAAgAigB"
+
+
+def _pasajeros(busqueda: dict) -> list[int]:
+    from fli.search._proto import passenger_codes
+
+    return passenger_codes(SimpleNamespace(
+        adults=busqueda.get("adultos") or 1, children=busqueda.get("ninos") or 0,
+        infants_on_lap=busqueda.get("bebes") or 0, infants_in_seat=0,
+    ))
+
+
 def google_flights(busqueda: dict, opcion: Opcion) -> str:
-    """Búsqueda equivalente en Google Flights, para comprobar el vuelo con tus propios ojos."""
+    """La misma búsqueda (aeropuertos, fechas y pasajeros de esta opción) en Google Flights,
+    abierta directamente en la pestaña "Los más bajos"."""
+    try:
+        from fli.search._proto import encode_tfs_payload, encode_tfs_segment
+
+        segmentos = encode_tfs_segment([opcion.ida.origen], [opcion.ida.destino], opcion.ida.fecha.isoformat())
+        if opcion.vuelta:
+            segmentos += encode_tfs_segment([opcion.vuelta.origen], [opcion.vuelta.destino], opcion.vuelta.fecha.isoformat())
+        tfs = encode_tfs_payload(segmentos, is_one_way=opcion.vuelta is None, passengers=_pasajeros(busqueda), pin_max_u64=True)
+        return f"https://www.google.com/travel/flights/search?tfs={tfs}&tfu={PESTANA_MAS_BAJOS}&hl=es&gl=ES&curr=EUR"
+    except Exception as e:  # si la librería cambia, queda la búsqueda por texto
+        log.warning("No se pudo crear el enlace de Google Flights: %s", type(e).__name__)
     o, d = opcion.ida.origen, opcion.ida.destino
     if opcion.vuelta:
         q = f"Flights to {d} from {o} on {opcion.ida.fecha} through {opcion.vuelta.fecha}"
@@ -52,12 +76,9 @@ def comprar_ya(busqueda: dict, opcion: Opcion) -> list[dict]:
     """Enlaces a la página de reserva de Google Flights con esos vuelos exactos ya elegidos
     (allí sale "Reservar con <aerolínea>"). Si ida y vuelta son billetes separados, uno para cada uno."""
     try:
-        from fli.search._proto import encode_tfs_payload, passenger_codes
+        from fli.search._proto import encode_tfs_payload
 
-        pasajeros = passenger_codes(SimpleNamespace(
-            adults=busqueda.get("adultos") or 1, children=busqueda.get("ninos") or 0,
-            infants_on_lap=busqueda.get("bebes") or 0, infants_in_seat=0,
-        ))
+        pasajeros = _pasajeros(busqueda)
 
         def url(segmentos: bytes, solo_ida: bool) -> str:
             tfs = encode_tfs_payload(segmentos, is_one_way=solo_ida, passengers=pasajeros)

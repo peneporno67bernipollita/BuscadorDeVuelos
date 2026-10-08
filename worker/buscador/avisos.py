@@ -120,7 +120,7 @@ def mensaje_aviso(
     lineas += ["", "🏢 <b>O en la web oficial:</b>"]
     for e in enlaces_compra:
         lineas.append(f'• <a href="{_e(e["url"])}">{_e(e["aerolinea"])}</a>')
-    lineas.append(f'🔎 <a href="{_e(enlace_google)}">Ver estos vuelos en Google Flights</a>')
+    lineas.append(f'🔎 <a href="{_e(enlace_google)}">Ver los más baratos en Google Flights</a>')
     if url_web:
         lineas.append(f'📈 <a href="{_e(url_web)}">Historial en tu web</a>')
     lineas.append("Revisa el precio final en la web antes de pagar: puede cambiar en cualquier momento.")
