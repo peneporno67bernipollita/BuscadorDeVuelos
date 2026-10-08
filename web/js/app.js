@@ -64,6 +64,12 @@ async function alCambiarUsuario(u) {
     try {
       perfilCompletado = Boolean((await api.perfil())?.perfil_completado);
     } catch (e) {
+      // El usuario de la sesión guardada ya no existe (p. ej. se borró en Supabase): cerrar sesión
+      if (/0 rows|no rows|multiple \(or no\) rows|JWT|not found/i.test(e.message)) {
+        await api.salir();
+        aviso("Tu sesión anterior ya no es válida. Entra o crea tu cuenta de nuevo.");
+        return;
+      }
       aviso(e.message, "error");
     }
   }
