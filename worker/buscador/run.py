@@ -59,7 +59,9 @@ def vincular_telegram(db: Supabase, tg: Telegram, perfiles: dict[str, dict]) -> 
     offset = ajuste[0]["valor"] if ajuste else None
     codigos = {p["telegram_codigo"].upper(): p for p in perfiles.values() if p.get("telegram_codigo")}
     ultimo, vinculados = offset, 0
-    for m in tg.mensajes_nuevos(offset):
+    mensajes = tg.mensajes_nuevos(offset)
+    log.info("Telegram: %s mensaje(s) nuevo(s) para el bot", len(mensajes))
+    for m in mensajes:
         ultimo = m["update_id"]
         mensaje = m.get("message") or {}
         chat = (mensaje.get("chat") or {}).get("id")
@@ -175,6 +177,12 @@ def main() -> int:
     # httpx registra cada URL pedida (rutas, fechas...): no debe aparecer en registros públicos
     logging.getLogger("httpx").setLevel(logging.WARNING)
     url, clave = os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_SERVICE_KEY")
+    # Diagnóstico sin revelar nada: solo si cada dato de configuración existe o no
+    hay = lambda nombre: "sí" if os.environ.get(nombre) else "NO"
+    log.info(
+        "Configuración: SUPABASE_URL=%s · SUPABASE_SERVICE_KEY=%s · TELEGRAM_BOT_TOKEN=%s · URL_WEB=%s",
+        hay("SUPABASE_URL"), hay("SUPABASE_SERVICE_KEY"), hay("TELEGRAM_BOT_TOKEN"), hay("URL_WEB"),
+    )
     if not url or not clave:
         # Sin configurar todavía: se avisa en el registro pero no se marca como fallo
         log.warning("Faltan SUPABASE_URL y/o SUPABASE_SERVICE_KEY (secretos del repositorio en GitHub). Nada que hacer.")
@@ -195,11 +203,19 @@ def main() -> int:
         perfiles = {p["id"]: p for p in db.leer("perfiles")}
         config = {f["fuente"]: f for f in db.leer("estado_fuentes")}
 
+        log.info("Supabase: conexión correcta · %s perfil(es), %s con Telegram vinculado, %s con código pendiente",
+                 len(perfiles), sum(1 for p in perfiles.values() if p.get("telegram_chat_id")),
+                 sum(1 for p in perfiles.values() if p.get("telegram_codigo")))
         tg = Telegram(token) if token else None
+        if tg and not tg.token_valido():
+            resumen["errores"].append("El token de Telegram no es válido: revisa el secreto TELEGRAM_BOT_TOKEN")
+            tg = None
         if tg:
             resumen["telegram_vinculados"] = vincular_telegram(db, tg, perfiles)
+            log.info("Telegram: token válido · %s chat(s) vinculado(s) en esta ronda", resumen["telegram_vinculados"])
         else:
-            resumen["errores"].append("Sin TELEGRAM_BOT_TOKEN: no se envían avisos")
+            resumen["errores"].append("Sin TELEGRAM_BOT_TOKEN válido: no se envían avisos")
+            log.warning("Telegram: sin token válido, no se pueden enviar avisos")
 
         pendientes = []
         for b in db.leer("busquedas", activa="eq.true"):

@@ -130,8 +130,19 @@ class Telegram:
                 log.warning("Telegram respondió %s: %s", r.status_code, r.text[:200])
             return r.status_code == 200
         except httpx.HTTPError as e:
-            log.warning("No se pudo enviar el aviso por Telegram: %s", e)
+            log.warning("No se pudo enviar el aviso por Telegram: %s", type(e).__name__)
             return False
+
+    def token_valido(self) -> bool:
+        """Comprueba el token con getMe (sin escribir nada en el registro que lo revele)."""
+        try:
+            r = self.http.get(f"{self.url}/getMe")
+        except httpx.HTTPError as e:
+            log.warning("Telegram no responde: %s", type(e).__name__)
+            return False
+        if r.status_code != 200:
+            log.warning("Telegram rechaza el token (HTTP %s)", r.status_code)
+        return r.status_code == 200
 
     def mensajes_nuevos(self, desde_update: int | None) -> list[dict]:
         params = {"timeout": 0, "allowed_updates": '["message"]'}
@@ -139,11 +150,14 @@ class Telegram:
             params["offset"] = desde_update + 1
         try:
             r = self.http.get(f"{self.url}/getUpdates", params=params)
-            r.raise_for_status()
-            return r.json().get("result", [])
         except httpx.HTTPError as e:
-            log.warning("No se pudieron leer los mensajes de Telegram: %s", e)
+            log.warning("No se pudieron leer los mensajes de Telegram: %s", type(e).__name__)
             return []
+        if r.status_code != 200:
+            # 409 = el bot tiene un webhook configurado y no admite getUpdates
+            log.warning("No se pudieron leer los mensajes de Telegram (HTTP %s): %s", r.status_code, r.text[:150])
+            return []
+        return r.json().get("result", [])
 
 
 def codigo_en_mensaje(texto: str) -> str | None:
