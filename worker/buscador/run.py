@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import sys
 import time
 from collections import Counter
@@ -31,6 +32,25 @@ ZONA = ZoneInfo("Europe/Madrid")
 LIMITE_RONDA_S = 12 * 60  # tiempo máximo de consultas por ronda (ahorra minutos de GitHub)
 BLOQUEO_MAX = timedelta(hours=48)
 OPCIONES_GUARDADAS = 5
+
+
+def _sin_urls(texto: str) -> str:
+    """Quita las URLs (pueden llevar rutas, fechas o tokens) antes de escribir en el registro público."""
+    return re.sub(r"https?://\S+", "<url>", str(texto))[:200]
+
+
+def _registrar_fuentes(estado: dict, resultados: dict) -> None:
+    """Resumen por web: solo números y tipo de error, nada personal."""
+    for nombre, est in estado.items():
+        por_fuente = [por[nombre] for por in resultados.values() if nombre in por]
+        log.info(
+            "%s: %s búsqueda(s), %s petición(es), %s vuelo(s), %s precio(s) de calendario%s",
+            nombre, est["busquedas"], est["peticiones"],
+            sum(len(r.opciones) for r in por_fuente), sum(len(r.calendario) for r in por_fuente),
+            f" · BLOQUEADA: {_sin_urls(est['bloqueo'])}" if est["bloqueo"] else "",
+        )
+        for error in est["errores"][:3]:
+            log.warning("%s: %s", nombre, _sin_urls(error))
 
 
 def _fecha_hora(valor: str | None) -> datetime | None:
@@ -247,6 +267,7 @@ def main() -> int:
                 tareas["ryanair"].sort(key=lambda b: (b.get("info") or {}).get("ryanair_ultima", ""))
             validadores = {b["id"]: Validador(b, aerolineas) for b in pendientes}
             resultados, estado = consultar(fuentes, tareas, validadores, config, LIMITE_RONDA_S)
+            _registrar_fuentes(estado, resultados)
             resumen["fuentes"] = estado
 
             for nombre, est in estado.items():
@@ -276,6 +297,8 @@ def main() -> int:
                 b["info"] = info
                 try:
                     validas, rechazos, calendario = evaluar(b, por_fuente, perfiles.get(b["usuario"]), aerolineas)
+                    log.info("Búsqueda %s…: %s opción(es) válida(s); descartadas: %s",
+                             b["id"][:8], len(validas), dict(rechazos) or "ninguna")
                     if procesar_busqueda(db, b, validas, rechazos, calendario, list(por_fuente), perfiles.get(b["usuario"]),
                                          aerolineas, tg, url_web, hoy, ahora):
                         resumen["avisos"] += 1
