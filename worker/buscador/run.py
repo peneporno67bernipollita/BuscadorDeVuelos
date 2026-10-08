@@ -19,6 +19,7 @@ import logging
 import os
 import re
 import sys
+import threading
 import time
 from collections import Counter
 from datetime import date, datetime, timedelta, timezone
@@ -42,6 +43,8 @@ BLOQUEO_MAX = timedelta(hours=48)
 OPCIONES_GUARDADAS = 5
 ESPERA_ENTRE_VUELTAS_S = 60  # en modo continuo: cada minuto se mira Telegram y qué toca revisar
 MARGEN_FINAL_S = 15 * 60  # en modo continuo no se empieza una ronda si queda menos que esto
+ATENCION_ESPERA_S = 10  # en modo continuo, Telegram y las pruebas de la web se atienden cada ~10 s en paralelo
+LATIDO_CADA_S = 60
 PRIMERA_REVISION_MIN = 2  # una búsqueda nueva se mira en cuanto la web lleve 2 min sin consultarse
 LIMPIEZA_CADA = timedelta(hours=6)
 VERSION_DATOS = 2
@@ -145,13 +148,13 @@ def escribir_latido(db: Supabase, modo: str, hasta: datetime | None) -> None:
 # ----------------------------------------------------------------------------------------
 # Telegram
 # ----------------------------------------------------------------------------------------
-def atender_telegram(db: Supabase, tg: Telegram, perfiles: dict[str, dict], url_web: str | None) -> int:
+def atender_telegram(db: Supabase, tg: Telegram, perfiles: dict[str, dict], url_web: str | None, espera: int = 0) -> int:
     """Vincula chats con el código de la web, responde a /estado y /ayuda y envía mensajes de prueba."""
     offset = _ajuste(db, "telegram_offset")
     codigos = {p["telegram_codigo"].upper(): p for p in perfiles.values() if p.get("telegram_codigo")}
     por_chat = {str(p["telegram_chat_id"]): p for p in perfiles.values() if p.get("telegram_chat_id")}
     ultimo, vinculados = offset, 0
-    for m in tg.mensajes_nuevos(offset):
+    for m in tg.mensajes_nuevos(offset, espera):
         ultimo = m["update_id"]
         mensaje = m.get("message") or {}
         chat = (mensaje.get("chat") or {}).get("id")
@@ -196,6 +199,40 @@ def atender_telegram(db: Supabase, tg: Telegram, perfiles: dict[str, dict], url_
                 tg.enviar(p["telegram_chat_id"], "🔔 Alarma de prueba enviada a la app ntfy." if ok else
                           "🔔 No se pudo enviar la alarma de prueba (ntfy no respondió). Se reintentará si la pides otra vez.")
     return vinculados
+
+
+class Atencion(threading.Thread):
+    """En modo continuo, en paralelo a las búsquedas: contesta a Telegram en cuanto le escribes, atiende las
+    pruebas pedidas desde la web en unos segundos y mantiene al día la señal de vida (aunque una búsqueda
+    tarde varios minutos). Usa sus propias conexiones: no comparte nada con el hilo de las búsquedas."""
+
+    def __init__(self, url: str, clave: str, token: str | None, url_web: str | None, hasta: datetime | None):
+        super().__init__(name="atencion", daemon=True)
+        self.url, self.clave, self.token, self.url_web, self.hasta = url, clave, token, url_web, hasta
+        self.parar = threading.Event()
+
+    def vuelta(self, db: Supabase, tg: Telegram | None, ultimo_latido: float) -> float:
+        if time.monotonic() - ultimo_latido >= LATIDO_CADA_S:
+            escribir_latido(db, "continuo", self.hasta)
+            ultimo_latido = time.monotonic()
+        if tg:
+            perfiles = {p["id"]: p for p in db.leer("perfiles")}
+            if atender_telegram(db, tg, perfiles, self.url_web, espera=ATENCION_ESPERA_S):
+                log.info("Telegram: chat vinculado")
+        else:
+            self.parar.wait(ATENCION_ESPERA_S)
+        return ultimo_latido
+
+    def run(self) -> None:
+        db = Supabase(self.url, self.clave)
+        tg = Telegram(self.token) if self.token else None
+        ultimo_latido = float("-inf")
+        while not self.parar.is_set():
+            try:
+                ultimo_latido = self.vuelta(db, tg, ultimo_latido)
+            except Exception as e:  # un fallo de red no para la atención: se reintenta enseguida
+                log.error("Fallo atendiendo Telegram: %s: %s", type(e).__name__, _sin_urls(e))
+                self.parar.wait(ATENCION_ESPERA_S)
 
 
 # ----------------------------------------------------------------------------------------
@@ -491,6 +528,11 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as e:
         log.warning("No se pudo actualizar la configuración: %s", type(e).__name__)
 
+    # En modo continuo, Telegram y la señal de vida van en paralelo (contesta en segundos)
+    atencion = Atencion(url, clave, token if tg else None, url_web, hasta) if fin else None
+    if atencion:
+        atencion.start()
+
     ultima_limpieza = None
     codigo_salida = 0
     while True:
@@ -499,8 +541,9 @@ def main(argv: list[str] | None = None) -> int:
             if ultima_limpieza is None or ahora - ultima_limpieza > LIMPIEZA_CADA:
                 limpiar_historial(db, ahora)
                 ultima_limpieza = ahora
-            escribir_latido(db, "continuo" if fin else "ronda", hasta)
-            if tg:
+            if not atencion:
+                escribir_latido(db, "ronda", hasta)
+            if tg and not atencion:
                 perfiles = {p["id"]: p for p in db.leer("perfiles")}
                 if atender_telegram(db, tg, perfiles, url_web):
                     log.info("Telegram: chat vinculado")
@@ -519,6 +562,9 @@ def main(argv: list[str] | None = None) -> int:
             break
         time.sleep(ESPERA_ENTRE_VUELTAS_S)
 
+    if atencion:
+        atencion.parar.set()
+        atencion.join(timeout=ATENCION_ESPERA_S + 20)
     log.info("Robot detenido tras %s min", round((time.monotonic() - inicio) / 60))
     return codigo_salida
 

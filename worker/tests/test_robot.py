@@ -46,7 +46,7 @@ class TelegramFalso:
         self.mensajes = mensajes
         self.enviados = []
 
-    def mensajes_nuevos(self, desde):
+    def mensajes_nuevos(self, desde, espera=0):
         return [m for m in self.mensajes if desde is None or m["update_id"] > desde]
 
     def enviar(self, chat, texto):
@@ -86,6 +86,22 @@ def test_vincular_con_codigo_y_responder_comandos():
     tg.enviados.clear()
     run.atender_telegram(db, tg, {p["id"]: p for p in db.leer("perfiles")}, None)
     assert tg.enviados == []
+
+
+def test_hilo_de_atencion_contesta_y_da_senal_de_vida():
+    db = BaseDeDatosFalsa({
+        "perfiles": [{"id": "u1", "telegram_codigo": None, "telegram_chat_id": "99", "telegram_prueba": True}],
+        "ajustes": [],
+    })
+    tg = TelegramFalso([_mensaje(1, 99, "/ayuda")])
+    atencion = run.Atencion("https://x.supabase.co", "clave", None, "https://web", None)
+    ultimo = atencion.vuelta(db, tg, float("-inf"))
+    assert ultimo > float("-inf") and db.leer("ajustes", clave="eq.latido")  # señal de vida escrita
+    textos = [t for _, t in tg.enviados]
+    assert any("Buscador de Vuelos" in t for t in textos) and any("prueba" in t.lower() for t in textos)
+    assert db.leer("perfiles")[0]["telegram_prueba"] is False
+    # La siguiente vuelta no vuelve a escribir la señal de vida hasta que pase un minuto
+    assert atencion.vuelta(db, TelegramFalso([]), ultimo) == ultimo
 
 
 def test_alarma_de_prueba_desde_la_web(monkeypatch):

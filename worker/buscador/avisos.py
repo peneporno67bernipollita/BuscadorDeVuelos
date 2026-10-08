@@ -242,12 +242,14 @@ class Telegram:
             log.warning("Telegram rechaza el token (HTTP %s)", r.status_code)
         return r.status_code == 200
 
-    def mensajes_nuevos(self, desde_update: int | None) -> list[dict]:
-        params = {"timeout": 0, "allowed_updates": '["message"]'}
+    def mensajes_nuevos(self, desde_update: int | None, espera: int = 0) -> list[dict]:
+        """Mensajes nuevos. Con `espera`, Telegram mantiene la petición abierta hasta esos segundos y
+        contesta en cuanto llega un mensaje (así el bot responde al momento)."""
+        params = {"timeout": espera, "allowed_updates": '["message"]'}
         if desde_update is not None:
             params["offset"] = desde_update + 1
         try:
-            r = self.http.get(f"{self.url}/getUpdates", params=params)
+            r = self.http.get(f"{self.url}/getUpdates", params=params, timeout=espera + 15)
         except httpx.HTTPError as e:
             log.warning("No se pudieron leer los mensajes de Telegram: %s", type(e).__name__)
             return []
