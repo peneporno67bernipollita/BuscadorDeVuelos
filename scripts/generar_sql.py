@@ -42,7 +42,16 @@ def main() -> None:
         f"insert into public.aerolineas ({', '.join(COLUMNAS)}) values\n{filas}\n"
         "on conflict (codigo) do nothing;\n"
     )
-    SALIDA.write_text(ESQUEMA.read_text(encoding="utf-8") + semilla, encoding="utf-8")
+    # Resultado visible al final: si salen 8 tablas y 77 aerolíneas, todo ha ido bien
+    comprobacion = (
+        "\n-- Comprobación final (debe salir: 8 tablas, 77 aerolíneas, 3 webs)\n"
+        "select 'Tablas creadas' as comprobacion, count(*) as total from information_schema.tables\n"
+        "  where table_schema = 'public' and table_name in\n"
+        "  ('perfiles','busquedas','precios','avisos','aerolineas','estado_fuentes','ejecuciones','ajustes')\n"
+        "union all select 'Aerolíneas en la lista blanca', count(*) from public.aerolineas\n"
+        "union all select 'Webs configuradas', count(*) from public.estado_fuentes;\n"
+    )
+    SALIDA.write_text(ESQUEMA.read_text(encoding="utf-8") + semilla + comprobacion, encoding="utf-8")
     print(f"{SALIDA} generado con {len(aerolineas)} aerolíneas")
 
 

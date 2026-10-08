@@ -198,9 +198,6 @@ begin
 end;
 $$;
 
-drop trigger if exists solo_un_usuario on auth.users;
-create trigger solo_un_usuario before insert on auth.users
-  for each row execute function public.solo_un_usuario();
 
 create or replace function public.crear_perfil()
 returns trigger language plpgsql security definer set search_path = public as $$
@@ -210,9 +207,20 @@ begin
 end;
 $$;
 
-drop trigger if exists crear_perfil on auth.users;
-create trigger crear_perfil after insert on auth.users
-  for each row execute function public.crear_perfil();
+-- Supabase no deja borrar triggers de auth.users (no somos sus dueños), así que
+-- solo se crean si todavía no existen: el script se puede ejecutar varias veces.
+do $$
+begin
+  if not exists (select 1 from pg_trigger where tgname = 'solo_un_usuario' and tgrelid = 'auth.users'::regclass) then
+    create trigger solo_un_usuario before insert on auth.users
+      for each row execute function public.solo_un_usuario();
+  end if;
+  if not exists (select 1 from pg_trigger where tgname = 'crear_perfil' and tgrelid = 'auth.users'::regclass) then
+    create trigger crear_perfil after insert on auth.users
+      for each row execute function public.crear_perfil();
+  end if;
+end;
+$$;
 
 -- Al cambiar algo de una búsqueda desde la web, se revisa en la siguiente ronda.
 -- Si cambia el viaje en sí (ruta, fechas, pasajeros, maletas, filtros), el historial

@@ -198,9 +198,6 @@ begin
 end;
 $$;
 
-drop trigger if exists solo_un_usuario on auth.users;
-create trigger solo_un_usuario before insert on auth.users
-  for each row execute function public.solo_un_usuario();
 
 create or replace function public.crear_perfil()
 returns trigger language plpgsql security definer set search_path = public as $$
@@ -210,9 +207,20 @@ begin
 end;
 $$;
 
-drop trigger if exists crear_perfil on auth.users;
-create trigger crear_perfil after insert on auth.users
-  for each row execute function public.crear_perfil();
+-- Supabase no deja borrar triggers de auth.users (no somos sus dueños), así que
+-- solo se crean si todavía no existen: el script se puede ejecutar varias veces.
+do $$
+begin
+  if not exists (select 1 from pg_trigger where tgname = 'solo_un_usuario' and tgrelid = 'auth.users'::regclass) then
+    create trigger solo_un_usuario before insert on auth.users
+      for each row execute function public.solo_un_usuario();
+  end if;
+  if not exists (select 1 from pg_trigger where tgname = 'crear_perfil' and tgrelid = 'auth.users'::regclass) then
+    create trigger crear_perfil after insert on auth.users
+      for each row execute function public.crear_perfil();
+  end if;
+end;
+$$;
 
 -- Al cambiar algo de una búsqueda desde la web, se revisa en la siguiente ronda.
 -- Si cambia el viaje en sí (ruta, fechas, pasajeros, maletas, filtros), el historial
@@ -403,3 +411,10 @@ insert into public.aerolineas (codigo, nombre, permitida, criterio, web_oficial,
   ('G3', 'GOL', true, 'AirlineRatings 2026: top 25 low cost (nº24)', 'https://www.voegol.com.br', 50, 80, 80, 80, 'tramo', null, 'La tarifa básica solo incluye un bolso pequeño; maletas = máximo publicado (estimación).'),
   ('H2', 'SKY Airline', true, 'AirlineRatings 2026: top 25 low cost (nº25)', 'https://www.skyairline.com', 50, 80, 80, 80, 'tramo', null, 'La tarifa básica solo incluye un bolso pequeño; maletas = máximo publicado (estimación).')
 on conflict (codigo) do nothing;
+
+-- Comprobación final (debe salir: 8 tablas, 77 aerolíneas, 3 webs)
+select 'Tablas creadas' as comprobacion, count(*) as total from information_schema.tables
+  where table_schema = 'public' and table_name in
+  ('perfiles','busquedas','precios','avisos','aerolineas','estado_fuentes','ejecuciones','ajustes')
+union all select 'Aerolíneas en la lista blanca', count(*) from public.aerolineas
+union all select 'Webs configuradas', count(*) from public.estado_fuentes;
