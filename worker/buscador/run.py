@@ -103,6 +103,20 @@ def vincular_telegram(db: Supabase, tg: Telegram, perfiles: dict[str, dict]) -> 
     return vinculados
 
 
+def acumular_calendario(info: dict, nuevos: list, hoy: date, dias_validez: int = 10) -> None:
+    """Guarda en info.calendario los precios vistos (chollo) y pasa el turno de fechas a la siguiente ronda."""
+    acumulado = dict(info.get("calendario") or {})
+    for c in nuevos:
+        acumulado[f"{c.fecha_ida.isoformat()}|{c.fecha_vuelta.isoformat() if c.fecha_vuelta else ''}"] = [
+            round(c.precio, 2), hoy.isoformat()
+        ]
+    limite = (hoy - timedelta(days=dias_validez)).isoformat()
+    info["calendario"] = {
+        clave: valor for clave, valor in acumulado.items() if clave[:10] > hoy.isoformat() and valor[1] >= limite
+    }
+    info["chollo_turno"] = int(info.get("chollo_turno", 0)) + 1
+
+
 def _fila_precio(b: dict, op: Opcion, es_mejor: bool, aerolineas: dict) -> dict:
     detalle = op.a_dict()
     detalle["enlaces"] = enlaces.compra(b, op, aerolineas)
@@ -297,9 +311,14 @@ def main() -> int:
                     r = por_fuente["ryanair"]
                     if not r.opciones and not r.error:
                         info["ryanair_sin_ruta_hasta"] = (hoy + timedelta(days=7)).isoformat()
+                if b["modo"] == "chollo" and "google_flights" in por_fuente:
+                    acumular_calendario(info, por_fuente["google_flights"].calendario, hoy)
                 b["info"] = info
                 try:
                     validas, rechazos, calendario = evaluar(b, por_fuente, perfiles.get(b["usuario"]), aerolineas)
+                    if b["modo"] == "chollo":
+                        # Lo "normal" de la ruta se calcula con todo lo visto en los últimos días
+                        calendario = [precio for precio, _visto in (info.get("calendario") or {}).values()]
                     log.info("Búsqueda %s…: %s opción(es) válida(s); descartadas: %s",
                              b["id"][:8], len(validas), dict(rechazos) or "ninguna")
                     if procesar_busqueda(db, b, validas, rechazos, calendario, list(por_fuente), perfiles.get(b["usuario"]),

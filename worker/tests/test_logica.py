@@ -183,8 +183,36 @@ def test_url_con_o_sin_rest_v1():
 def test_clasificar_respuestas_de_google():
     from buscador.fuentes.google_flights import describir_respuesta
 
-    assert describir_respuesta(200, ")]}'\n[[1]]").startswith("datos normales")
+    pagina = "<html><script>AF_initDataCallback({key: 'ds:1', data: []})</script></html>"
+    assert describir_respuesta(200, pagina).startswith("página de resultados")
+    error13 = ')]}\'\n[["wrb.fr",null,null,null,null,[13,null,[["type.googleapis.com/travel.frontend.flights.ErrorResponse"]]]]]'
+    assert describir_respuesta(200, error13).startswith("error 13")
     assert describir_respuesta(429, "<html>").startswith("bloqueo")
     assert describir_respuesta(200, "<html>Our systems have detected unusual traffic").startswith("bloqueo")
     assert describir_respuesta(200, '<html><a href="https://consent.google.com/x">').startswith("página de consentimiento")
-    assert describir_respuesta(200, "<html><body>hola</body></html>").startswith("página HTML")
+    assert describir_respuesta(200, "<html><body>hola</body></html>").startswith("página sin datos")
+
+
+def test_muestras_y_calendario_acumulado_del_chollo():
+    from buscador.fuentes.google_flights import FECHAS_CHOLLO_POR_RONDA, GoogleFlights, calendario_guardado
+    from buscador.modelos import PrecioCalendario
+    from buscador.run import acumular_calendario
+
+    hoy = date.today()
+    b = busqueda(modo="chollo", ida_vuelta=True, chollo_desde=(hoy + timedelta(days=5)).isoformat(),
+                 chollo_hasta=(hoy + timedelta(days=95)).isoformat(), noches_min=2, noches_max=4, info={})
+    vistas = set()
+    for turno in range(40):
+        b["info"]["chollo_turno"] = turno
+        muestras = GoogleFlights._muestras_chollo(b)
+        assert 0 < len(muestras) <= FECHAS_CHOLLO_POR_RONDA
+        for fi, noches in muestras:
+            assert fi + timedelta(days=noches) <= hoy + timedelta(days=95)
+        vistas |= set(muestras)
+    assert len(vistas) > 250  # la rotación acaba cubriendo casi todo el periodo
+
+    info = {"calendario": {"2000-01-01|2000-01-03": [10, "2000-01-01"]}}  # pasada: se descarta
+    acumular_calendario(info, [PrecioCalendario(hoy + timedelta(days=9), hoy + timedelta(days=12), 80.0)], hoy)
+    assert list(info["calendario"]) == [f"{hoy + timedelta(days=9)}|{hoy + timedelta(days=12)}"]
+    assert info["chollo_turno"] == 1
+    assert calendario_guardado({"info": info})[0].precio == 80.0

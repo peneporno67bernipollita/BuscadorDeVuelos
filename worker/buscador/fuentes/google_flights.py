@@ -8,10 +8,15 @@ entre peticiones y como máximo una petición cada `pausa_min` segundos.
 from __future__ import annotations
 
 import logging
+import os
 import random
 import threading
 import time
 from datetime import date, timedelta
+
+# Como mucho 30 s por página (la librería espera 60 por defecto y reintenta varias veces).
+# Tiene que fijarse antes de importar fli, que lo lee al cargarse.
+os.environ.setdefault("FLI_TIMEOUT", "30")
 
 from fli.models import (
     Airline,
@@ -39,6 +44,7 @@ log = logging.getLogger(__name__)
 LOCALE = {"currency": "EUR", "language": "es", "country": "ES"}
 ESCALAS = {0: MaxStops.NON_STOP, 1: MaxStops.ONE_STOP_OR_FEWER, 2: MaxStops.TWO_OR_FEWER_STOPS}
 MAX_DIAS_FUTURO = 300  # Google no busca más allá de ~305 días
+FECHAS_CHOLLO_POR_RONDA = 8  # páginas de calendario por búsqueda chollo y ronda
 
 
 def _codigo(aerolinea) -> str:
@@ -69,15 +75,19 @@ def _es_bloqueo(error: Exception) -> bool:
 
 def describir_respuesta(estado: int, cuerpo: str) -> str:
     """Clasifica una respuesta de Google sin copiar su contenido (puede llevar datos de la búsqueda)."""
-    texto = cuerpo[:5000].lower()
-    if estado == 429 or "unusual traffic" in texto or "/sorry/" in texto or "captcha" in texto:
+    inicio = cuerpo[:5000].lower()
+    if estado == 429 or "unusual traffic" in inicio or "/sorry/" in inicio:
         return f"bloqueo (HTTP {estado})"
-    if "consent.google" in texto or "before you continue" in texto or "antes de ir a google" in texto:
+    if "af_initdatacallback" in cuerpo[:200000].lower() or "ds:1" in cuerpo:
+        return f"página de resultados (HTTP {estado})"
+    if "consent.google" in inicio or "before you continue" in inicio or "antes de ir a google" in inicio:
         return f"página de consentimiento de cookies (HTTP {estado})"
     if cuerpo.lstrip().startswith(")]}'"):
-        return f"datos normales (HTTP {estado}, {len(cuerpo)} bytes)"
-    if "<html" in texto:
-        return f"página HTML inesperada (HTTP {estado}, {len(cuerpo)} bytes)"
+        if "ErrorResponse" in cuerpo[:2000]:
+            return f"error 13 de Google: forma de consulta antigua rechazada (HTTP {estado})"
+        return f"datos (HTTP {estado}, {len(cuerpo)} bytes)"
+    if "<html" in inicio:
+        return f"página sin datos de vuelos (HTTP {estado}, {len(cuerpo)} bytes)"
     return f"respuesta desconocida (HTTP {estado}, {len(cuerpo)} bytes)"
 
 
@@ -97,14 +107,15 @@ class GoogleFlights:
     def _vigilar_respuestas(self) -> None:
         """Anota qué tipo de respuesta da Google: la librería devuelve 0 vuelos sin avisar si no es la normal."""
         cliente = get_client()
-        original = type(cliente).post
+        for metodo in ("get", "post"):
+            original = getattr(type(cliente), metodo)
 
-        def post(cliente_, *args, **kwargs):
-            r = original(cliente_, *args, **kwargs)
-            self.respuestas.append(describir_respuesta(r.status_code, r.text))
-            return r
+            def vigilado(cliente_, *args, _original=original, **kwargs):
+                r = _original(cliente_, *args, **kwargs)
+                self.respuestas.append(describir_respuesta(r.status_code, r.text))
+                return r
 
-        cliente.post = post.__get__(cliente)
+            setattr(cliente, metodo, vigilado.__get__(cliente))
 
     @staticmethod
     def _aerolinea(codigo: str):
@@ -137,9 +148,14 @@ class GoogleFlights:
             raise ValueError(f"Google Flights no reconoce el aeropuerto {codigo}")
         return Airport[codigo]
 
-    def _segmento(self, b: dict, sentido: str, fecha: date) -> FlightSegment:
+    @staticmethod
+    def _tiene_franjas(b: dict) -> bool:
+        sentidos = ("ida", "vuelta") if b.get("ida_vuelta") else ("ida",)
+        return any(filtros.franja(b, s) != (0, 24, 0, 24) for s in sentidos)
+
+    def _segmento(self, b: dict, sentido: str, fecha: date, con_horas: bool = True) -> FlightSegment:
         o, d = (b["origen"], b["destino"]) if sentido == "ida" else (b["destino"], b["origen"])
-        sal_min, sal_max, lle_min, lle_max = filtros.franja(b, sentido)
+        sal_min, sal_max, lle_min, lle_max = filtros.franja(b, sentido) if con_horas else (0, 24, 0, 24)
         horas = TimeRestrictions(
             earliest_departure=sal_min or None,
             latest_departure=sal_max if sal_max < 24 else None,
@@ -175,9 +191,11 @@ class GoogleFlights:
         hasta = min(hasta, date.today() + timedelta(days=MAX_DIAS_FUTURO))
         if hasta < desde:
             return []
-        segmentos = [self._segmento(b, "ida", desde)]
+        # Sin franjas horarias: con ellas el calendario de Google devuelve un solo día (como con la
+        # escala). Es solo una referencia de precios; los horarios se filtran en las búsquedas de vuelos.
+        segmentos = [self._segmento(b, "ida", desde, con_horas=False)]
         if noches:
-            segmentos.append(self._segmento(b, "vuelta", desde + timedelta(days=noches)))
+            segmentos.append(self._segmento(b, "vuelta", desde + timedelta(days=noches), con_horas=False))
         comunes = self._comunes(b)
         # Con límite de duración de escala, el calendario de Google devuelve un solo día (probado
         # el 6/10/2026). El calendario es solo una referencia de precios: la escala se filtra después.
@@ -198,43 +216,50 @@ class GoogleFlights:
             if r.price
         ]
 
-    def _solo_ida(self, b: dict, sentido: str, fecha: date) -> list:
+    def _solo_ida(self, b: dict, sentido: str, fecha: date, con_horas: bool = True) -> list:
         f = FlightSearchFilters(
             trip_type=TripType.ONE_WAY,
-            flight_segments=[self._segmento(b, sentido, fecha)],
+            flight_segments=[self._segmento(b, sentido, fecha, con_horas)],
             sort_by=SortBy.CHEAPEST,
             **self._comunes(b),
         )
         return self._llamar(SearchFlights().search, f) or []
 
+    def _ida_y_vuelta(self, b: dict, fecha_ida: date, fecha_vuelta: date, con_horas: bool = True, top_n: int = 2) -> list[Opcion]:
+        f = FlightSearchFilters(
+            trip_type=TripType.ROUND_TRIP,
+            flight_segments=[
+                self._segmento(b, "ida", fecha_ida, con_horas), self._segmento(b, "vuelta", fecha_vuelta, con_horas)
+            ],
+            sort_by=SortBy.CHEAPEST,
+            **self._comunes(b),
+        )
+        opciones: list[Opcion] = []
+        # top_n=2: se piden las vueltas de las 2 idas más baratas (3 peticiones)
+        for combo in self._llamar(SearchFlights().search, f, top_n=top_n, peticiones=top_n + 1) or []:
+            ida, vuelta = combo[0], combo[-1]
+            if vuelta.price is None or ida.self_transfer or vuelta.self_transfer:
+                continue
+            tr_ida, tr_vuelta = _a_trayecto(ida), _a_trayecto(vuelta)
+            aerolineas_ida = {t.aerolinea for t in tr_ida.tramos}
+            aerolineas_vuelta = {t.aerolinea for t in tr_vuelta.tramos}
+            opciones.append(
+                Opcion(
+                    fuente=self.nombre,
+                    ida=tr_ida,
+                    vuelta=tr_vuelta,
+                    precio_billetes=float(vuelta.price),
+                    # Si no comparten aerolínea, Google lo vende como dos billetes
+                    billetes_separados=not (aerolineas_ida & aerolineas_vuelta),
+                )
+            )
+        return opciones
+
     def vuelos(self, b: dict, fecha_ida: date, fecha_vuelta: date | None, validador: filtros.Validador) -> list[Opcion]:
         """Opciones concretas para unas fechas: ida y vuelta juntas y, además, dos billetes de solo ida."""
         opciones: list[Opcion] = []
         if fecha_vuelta:
-            f = FlightSearchFilters(
-                trip_type=TripType.ROUND_TRIP,
-                flight_segments=[self._segmento(b, "ida", fecha_ida), self._segmento(b, "vuelta", fecha_vuelta)],
-                sort_by=SortBy.CHEAPEST,
-                **self._comunes(b),
-            )
-            # top_n=2: se piden las vueltas de las 2 idas más baratas (3 peticiones)
-            for combo in self._llamar(SearchFlights().search, f, top_n=2, peticiones=3) or []:
-                ida, vuelta = combo[0], combo[-1]
-                if vuelta.price is None or ida.self_transfer or vuelta.self_transfer:
-                    continue
-                tr_ida, tr_vuelta = _a_trayecto(ida), _a_trayecto(vuelta)
-                aerolineas_ida = {t.aerolinea for t in tr_ida.tramos}
-                aerolineas_vuelta = {t.aerolinea for t in tr_vuelta.tramos}
-                opciones.append(
-                    Opcion(
-                        fuente=self.nombre,
-                        ida=tr_ida,
-                        vuelta=tr_vuelta,
-                        precio_billetes=float(vuelta.price),
-                        # Si no comparten aerolínea, Google lo vende como dos billetes
-                        billetes_separados=not (aerolineas_ida & aerolineas_vuelta),
-                    )
-                )
+            opciones += self._ida_y_vuelta(b, fecha_ida, fecha_vuelta)
 
         # Billetes de solo ida (y vuelta por separado): en low cost suele salir más barato
         mejor = {}
@@ -264,6 +289,18 @@ class GoogleFlights:
                     billetes_separados=tr_vuelta is not None,
                 )
             )
+
+        if not opciones and self._tiene_franjas(b):
+            # Google filtra por horario y devuelve una lista vacía sin más. Se repite sin franjas y el
+            # robot aplica tus horarios: así puede decirte cuántos vuelos hay fuera de ellos (y no se
+            # pierde ninguno si Google interpreta los límites de hora de forma más estricta).
+            if fecha_vuelta:
+                opciones += self._ida_y_vuelta(b, fecha_ida, fecha_vuelta, con_horas=False, top_n=1)
+            else:
+                for r in self._solo_ida(b, "ida", fecha_ida, con_horas=False):
+                    if r.price is not None and not r.self_transfer:
+                        opciones.append(Opcion(fuente=self.nombre, ida=_a_trayecto(r), vuelta=None,
+                                               precio_billetes=float(r.price)))
         return opciones
 
     # ------------------------------------------------------------------
@@ -274,41 +311,74 @@ class GoogleFlights:
         """Descarta la sesión HTTP anterior (y sus cookies): cada búsqueda empieza de cero."""
         get_client()._sessions = threading.local()
 
+    @staticmethod
+    def _muestras_chollo(b: dict) -> list[tuple[date, int | None]]:
+        """Fechas del periodo del chollo que se miran en esta ronda.
+
+        Desde agosto de 2026 cada fecha del calendario cuesta una página entera de Google (~2 MB),
+        así que no se pide el periodo completo: cada ronda mira unas pocas fechas repartidas y la
+        siguiente desplaza la selección (info.chollo_turno), hasta cubrirlo todo en pocos días.
+        """
+        manana = date.today() + timedelta(days=1)
+        desde = max(date.fromisoformat(str(b["chollo_desde"])), manana)
+        hasta = min(date.fromisoformat(str(b["chollo_hasta"])), date.today() + timedelta(days=MAX_DIAS_FUTURO))
+        if b.get("ida_vuelta"):
+            n_min, n_max = b["noches_min"], b["noches_max"]
+            noches_posibles = sorted({n_min, (n_min + n_max) // 2, n_max})
+        else:
+            noches_posibles = [None]
+        candidatos = [
+            (desde + timedelta(days=i), n)
+            for i in range((hasta - desde).days + 1)
+            for n in noches_posibles
+            if n is None or desde + timedelta(days=i + n) <= hasta
+        ]
+        if not candidatos:
+            return []
+        turno = int((b.get("info") or {}).get("chollo_turno", 0))
+        salto = max(1, len(candidatos) // FECHAS_CHOLLO_POR_RONDA)
+        elegidos = {(turno + i * salto) % len(candidatos) for i in range(FECHAS_CHOLLO_POR_RONDA)}
+        return [candidatos[i] for i in sorted(elegidos)]
+
     def buscar(self, b: dict, validador: filtros.Validador) -> ResultadoFuente:
         self.nueva_sesion_privada()
         antes = self.peticiones
+        primera_respuesta = len(self.respuestas)
         res = ResultadoFuente()
         if b["modo"] == "fechas":
             fi = date.fromisoformat(str(b["fecha_ida"]))
             fv = date.fromisoformat(str(b["fecha_vuelta"])) if b.get("ida_vuelta") else None
             noches = (fv - fi).days if fv else None
             flex = b.get("flex_dias") or 0
-            # Calendario de ±7 días: sirve para saber qué es "habitual" y para elegir fechas si hay margen
-            if noches != 0:
-                res.calendario = self.calendario(b, fi - timedelta(days=7), fi + timedelta(days=7), noches)
             pares = [(fi, fv)]
-            if flex and res.calendario:
-                en_margen = sorted(
-                    (c for c in res.calendario if abs((c.fecha_ida - fi).days) <= flex), key=lambda c: c.precio
-                )
-                pares = [(c.fecha_ida, c.fecha_vuelta) for c in en_margen[:2]] or pares
+            # Con margen de días se mira el calendario (una página por día) para elegir las más baratas
+            if flex and noches != 0:
+                try:
+                    res.calendario = self.calendario(b, fi - timedelta(days=flex), fi + timedelta(days=flex), noches)
+                except FuenteBloqueada:
+                    raise
+                except Exception as e:  # sin calendario se buscan las fechas pedidas
+                    log.warning("Calendario no disponible: %s", type(e).__name__)
+                mas_baratas = sorted(res.calendario, key=lambda c: c.precio)
+                pares = [(c.fecha_ida, c.fecha_vuelta) for c in mas_baratas[:2]] or pares
         else:
-            desde = date.fromisoformat(str(b["chollo_desde"]))
-            hasta = date.fromisoformat(str(b["chollo_hasta"]))
-            if b.get("ida_vuelta"):
-                n_min, n_max = b["noches_min"], b["noches_max"]
-                for noches in sorted({n_min, (n_min + n_max) // 2, n_max}):
-                    res.calendario += self.calendario(b, desde, hasta - timedelta(days=noches), noches)
-            else:
-                res.calendario = self.calendario(b, desde, hasta, None)
-            mas_baratos = sorted(res.calendario, key=lambda c: c.precio)
-            pares, vistos = [], set()
-            for c in mas_baratos:
-                if (c.fecha_ida, c.fecha_vuelta) not in vistos:
-                    vistos.add((c.fecha_ida, c.fecha_vuelta))
-                    pares.append((c.fecha_ida, c.fecha_vuelta))
-                if len(pares) == 2:
-                    break
+            fallidas = 0
+            muestras = self._muestras_chollo(b)
+            for fi, noches in muestras:
+                try:
+                    res.calendario += self.calendario(b, fi, fi, noches)
+                except FuenteBloqueada:
+                    raise
+                except Exception as e:  # una fecha que falla no estropea las demás
+                    fallidas += 1
+                    log.warning("Fecha del chollo sin precio: %s", type(e).__name__)
+            if muestras and fallidas == len(muestras):
+                res.error = f"No se pudo consultar ninguna de las {fallidas} fechas del calendario"
+            # Lo más barato entre lo visto ahora y lo acumulado en rondas anteriores
+            vistos = {(c.fecha_ida, c.fecha_vuelta): c.precio for c in calendario_guardado(b)}
+            vistos.update({(c.fecha_ida, c.fecha_vuelta): c.precio for c in res.calendario})
+            futuros = [(precio, par) for par, precio in vistos.items() if par[0] > date.today()]
+            pares = [min(futuros)[1]] if futuros else []
 
         hoy = date.today()
         for fi, fv in pares:
@@ -317,10 +387,19 @@ class GoogleFlights:
             res.opciones += self.vuelos(b, fi, fv, validador)
         res.peticiones = self.peticiones - antes
 
-        recientes = self.respuestas[-res.peticiones:] if res.peticiones else []
+        recientes = self.respuestas[primera_respuesta:]
         if any(r.startswith("bloqueo") for r in recientes):
             raise FuenteBloqueada("Google Flights ha respondido con su página de tráfico inusual")
-        if not res.opciones:
+        if not res.opciones and pares and not res.error:
             tipos = sorted(set(recientes)) or ["ninguna respuesta"]
             res.error = "Google no devolvió vuelos. Respuestas: " + " | ".join(tipos)
         return res
+
+
+def calendario_guardado(b: dict) -> list[PrecioCalendario]:
+    """Precios de calendario acumulados en rondas anteriores (info.calendario: 'ida|vuelta' -> [precio, visto])."""
+    guardado = []
+    for clave, (precio, _visto) in ((b.get("info") or {}).get("calendario") or {}).items():
+        ida, _, vuelta = clave.partition("|")
+        guardado.append(PrecioCalendario(date.fromisoformat(ida), date.fromisoformat(vuelta) if vuelta else None, precio))
+    return guardado

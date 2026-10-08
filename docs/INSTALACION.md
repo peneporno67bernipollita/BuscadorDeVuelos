@@ -113,8 +113,11 @@ A partir de ahí el robot se ejecuta solo cada 3 horas.
   Si te acercas al límite, crea menos búsquedas simultáneas o pausa las lejanas.
 - **Supabase en pausa**: el plan gratuito pausa los proyectos sin actividad durante 7 días. El robot la usa cada 3 horas,
   así que no debería pasar; si pasara, entra en supabase.com y pulsa **Restore**.
-- **Si Google Flights deja de funcionar**: la librería `flights` (fli) se actualiza cuando Google cambia algo.
-  Sube su versión en `worker/requirements.txt`.
+- **Si Google Flights deja de funcionar** (búsquedas con "no se han encontrado vuelos" y, en el registro de la ronda,
+  `Google no devolvió vuelos` o `error 13`): Google ha vuelto a cambiar su sistema. La librería `flights` (fli) suele
+  corregirlo en su GitHub antes de publicar versión; en `worker/requirements.txt` cambia el commit fijado por el más
+  reciente de <https://github.com/punitarani/fli/commits/main>. Desde agosto de 2026 cada día del calendario de precios
+  cuesta una página de Google, por eso el modo chollo mira 8 fechas por ronda y las va rotando.
 - **Aerolíneas**: revisa y ajusta los precios de maletas en la pantalla **Aerolíneas** si al comprar ves que son otros.
 - **Skyscanner**: está desactivada porque bloquea a los robots. Puedes activarla en **Robot** para reintentar; si bloquea,
   el robot la deja descansar sola.
