@@ -3,7 +3,7 @@ import { graficaPrecios } from "../graficas.js";
 import { icono } from "../iconos.js";
 import {
   $, aeropuertos, aeropuertosDe, alSalir, animarTableros, tablero, aviso, cadaSegundos, confirmar, contarHasta, cuentaAtras, deltaHtml, destello, esc, eur,
-  fecha, fechaHora, fechasTexto, hace, horaLocal, limpiarPantalla, maletasTexto, pasajerosTexto,
+  fecha, fechaHora, fechasPrecioHtml, fechasTexto, hace, horaLocal, limpiarPantalla, maletasTexto, pasajerosTexto,
 } from "../util.js";
 
 const NOMBRE_FUENTE = { google_flights: "Google Flights", ryanair: "Ryanair", skyscanner: "Skyscanner" };
@@ -256,6 +256,7 @@ export async function vistaDetalle(app, id) {
             <div class="buscando oculto" id="buscando"></div>
             <div class="precio-grande gigante" id="precio-actual">—</div>
             <span id="delta-actual">${info.variacion != null ? deltaHtml(info.variacion) : ""}</span>
+            <div class="precio-fechas" id="fechas-actual">${opciones.length && !opcionesAntiguas && b.precio_actual != null ? fechasPrecioHtml(opciones[0]) : ""}</div>
           </div>
         </div>
         <div class="fila-compra">
@@ -422,6 +423,7 @@ export async function vistaDetalle(app, id) {
     $("#delta-actual").innerHTML = nueva.info?.variacion != null ? deltaHtml(nueva.info.variacion) : "";
     // Vuelos de la revisión nueva
     const nuevas = await api.ultimasOpciones(id);
+    $("#fechas-actual").innerHTML = nuevas.length && nueva.precio_actual != null ? fechasPrecioHtml(nuevas[0]) : "";
     if (nuevas.length) {
       $("#opciones").innerHTML = nuevas.map((p, i) => tarjetaVuelo(p, aerolineas, i === 0)).join("");
       $("#comprar-ya").innerHTML = botonesComprar(nuevas[0], { grande: true });

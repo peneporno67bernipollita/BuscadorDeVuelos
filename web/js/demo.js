@@ -95,6 +95,19 @@ function crearDatos() {
     opcion(2, p1 + 22, p1 - 210, 232, [tramo("VY", "8073", "SVQ", "ORY", ida1, "06:40", "09:15")], [tramo("VY", "8076", "ORY", "SVQ", vuelta1, "19:55", "22:25")], false),
     opcion(3, p1 + 66, p1 + 66, 0, [tramo("IB", "5101", "SVQ", "MAD", ida1, "07:10", "08:15"), tramo("IB", "3402", "MAD", "ORY", ida1, "09:35", "11:40")], [tramo("IB", "3405", "ORY", "MAD", vuelta1, "13:00", "15:05"), tramo("IB", "5110", "MAD", "SVQ", vuelta1, "16:20", "17:25")], false),
   ];
+  // El chollo de Lisboa: solo 2 noches y la vuelta llega pasada la medianoche
+  const idaLis = ahora + 23 * DIA;
+  const vueltaLis = idaLis + 2 * DIA;
+  const p2 = ultimo("demo-2");
+  const lisboa = opcion(4, p2, p2, 0, [tramo("FR", "7114", "SVQ", "LIS", idaLis, "06:15", "06:25")],
+    [{ ...tramo("FR", "7115", "LIS", "SVQ", vueltaLis, "22:50", "00:55"), llegada: `${soloFecha(vueltaLis + DIA)}T00:55` }], false);
+  const p3 = ultimo("demo-3");
+  const palma = opcion(5, p3, p3 - 60, 60, [tramo("UX", "6011", "MAD", "PMI", ida3, "08:05", "09:20")],
+    [tramo("UX", "6020", "PMI", "MAD", ida3 + 5 * DIA, "19:45", "21:05")], false);
+  opciones.push(
+    { ...lisboa, busqueda: "demo-2", revisado: iso(ahora - 19 * MIN), es_mejor: true, fecha_ida: soloFecha(idaLis), fecha_vuelta: soloFecha(vueltaLis) },
+    { ...palma, busqueda: "demo-3", revisado: iso(ahora - 17 * MIN), es_mejor: true, fecha_ida: soloFecha(ida3), fecha_vuelta: soloFecha(ida3 + 5 * DIA) },
+  );
 
   const avisos = [
     { id: 1, busqueda: "demo-1", usuario: "demo", enviado: iso(ahora - 2 * DIA), tipo: "presupuesto", motivo: `Total ${minimo("demo-1")} € para todos, sin pasar de tu máximo de 600 €.`, precio_total: minimo("demo-1"), entregado: true },
@@ -200,6 +213,7 @@ export function crearDemo() {
     historial: async (id, desde = null) => copia(d.historial.filter((h) => h.busqueda === id && (!desde || h.revisado >= desde))),
     historialTodas: async () => copia(d.historial.filter((h) => h.revisado >= new Date(Date.now() - 3 * DIA).toISOString())),
     ultimasOpciones: async (id) => copia(d.opciones.filter((o) => o.busqueda === id)),
+    ultimosMejores: async (ids) => copia(ids.map((id) => d.opciones.find((o) => o.busqueda === id && o.es_mejor)).filter(Boolean)),
     avisos: async (id) => copia(d.avisos.filter((a) => a.busqueda === id)),
     avisosRecientes: async () => copia(d.avisos),
     aerolineas: async () => copia(d.aerolineas),

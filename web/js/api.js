@@ -100,6 +100,14 @@ async function crearReal() {
         sb.from("precios").select("busqueda,revisado,precio_total").eq("es_mejor", true).gte("revisado", haceDias(3))
           .order("revisado", { ascending: true }),
       ),
+    /** Mejor opción de la última revisión de cada búsqueda: solo fechas y vuelos (para el panel). */
+    async ultimosMejores(ids) {
+      const filas = await Promise.all(ids.map(async (id) => comprobar(
+        await sb.from("precios").select("busqueda,revisado,fecha_ida,fecha_vuelta,ida:detalle->ida,vuelta:detalle->vuelta")
+          .eq("busqueda", id).eq("es_mejor", true).order("revisado", { ascending: false }).limit(1),
+      )));
+      return filas.flat();
+    },
     async ultimasOpciones(id) {
       const ultima = comprobar(
         await sb.from("precios").select("revisado").eq("busqueda", id).order("revisado", { ascending: false }).limit(1),

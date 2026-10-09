@@ -412,7 +412,22 @@ button:not(.primario).cargando::after { border-color: var(--borde-fuerte); borde
 .ruta.grande .aeropuerto .codigo { font-size: clamp(2rem, 1.5rem + 2vw, 3rem); }
 .ruta.grande .aeropuerto .ciudad { font-size: .9rem; max-width: 16rem; }
 
-.precio-bloque { display: flex; align-items: flex-end; justify-content: space-between; gap: .8rem; }
+.precio-bloque { display: flex; align-items: flex-end; justify-content: space-between; gap: .8rem 1rem; flex-wrap: wrap; }
+.precio-delta { margin-top: .4rem; }
+.precio-delta:empty { display: none; }
+/* Fechas y horas de los vuelos de ese precio, como en una tarjeta de embarque */
+.precio-fechas:empty { display: none; }
+.fp { display: grid; grid-template-columns: repeat(2, auto); gap: .2rem 1rem; justify-content: start; }
+.fp.solo-ida { grid-template-columns: auto; }
+.fp-tramo { display: flex; flex-direction: column; gap: .14rem; min-width: 0; }
+.fp-etq { font: 700 .62rem/1 var(--fuente-texto); letter-spacing: .09em; text-transform: uppercase; color: var(--tenue); }
+.fp-fecha { font: 700 1.08rem/1.1 var(--fuente-display); color: var(--texto); white-space: nowrap; }
+.fp-horas { font: 500 .74rem/1.2 var(--fuente-datos); color: var(--suave); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.fp-horas sup { font-size: .62rem; font-weight: 700; color: var(--alerta); margin-left: 1px; }
+.fp-noches { grid-column: 1 / -1; display: flex; align-items: center; gap: .3rem; margin-top: .35rem; font-size: .76rem; font-weight: 600; color: var(--suave); }
+.fp-noches svg { width: 13px; height: 13px; color: var(--primario); }
+#fechas-actual { margin-left: .6rem; padding-left: 1rem; border-left: 1px solid var(--borde); }
+@media (max-width: 560px) { #fechas-actual { margin-left: 0; padding-left: 0; border-left: 0; flex-basis: 100%; } }
 .precio-grande { font-size: 2.05rem; font-weight: 800; letter-spacing: -.035em; line-height: 1; font-variant-numeric: tabular-nums; }
 .precio-grande.gigante { font-size: clamp(2.4rem, 2rem + 2.2vw, 3.6rem); }
 .precio-etiqueta { font-size: .78rem; color: var(--suave); font-weight: 600; margin-top: .3rem; }

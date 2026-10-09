@@ -3,7 +3,7 @@ import { miniGrafica } from "../graficas.js";
 import { icono } from "../iconos.js";
 import {
   $, aeropuertos, aeropuertosDe, aviso, cadaSegundos, alSalir, tablero, contarHasta, cuentaAtras, deltaHtml, destello, esc, eur, fechaHora,
-  fechasTexto, hace, limpiarPantalla, pasajerosTexto,
+  fechasPrecioHtml, fechasTexto, hace, limpiarPantalla, pasajerosTexto,
 } from "../util.js";
 
 const TIPO_AVISO = {
@@ -39,7 +39,11 @@ function precioInicial(b) {
   return b.ultima_revision ? "—" : '<span class="buscando"><span class="anillo-mini"></span>Buscando…</span>';
 }
 
-function tarjetaBusqueda(b, datos) {
+/** Las fechas solo valen si son de la revisión que dio el precio actual (y no de antes de editar la búsqueda). */
+const fechasDe = (b, p) =>
+  b.precio_actual == null || !p || (b.historial_desde && p.revisado < b.historial_desde) ? "" : fechasPrecioHtml(p);
+
+function tarjetaBusqueda(b, datos, mejor) {
   const variacion = b.info?.variacion;
   const presupuesto = b.modo_precio === "presupuesto"
     ? `<span class="chip ${b.precio_actual != null && Number(b.precio_actual) <= Number(b.presupuesto) ? "ok" : ""}">${icono("euro")}Objetivo ${eur(b.presupuesto, true)}</span>`
@@ -63,8 +67,9 @@ function tarjetaBusqueda(b, datos) {
         <div>
           <div class="precio-grande" data-precio>${precioInicial(b)}</div>
           <div class="precio-etiqueta" data-etiqueta>${esc(etiquetaPrecio(b))}</div>
+          <div class="precio-delta" data-delta>${variacion != null ? deltaHtml(variacion) : ""}</div>
         </div>
-        <div data-delta>${variacion != null ? deltaHtml(variacion) : ""}</div>
+        <div class="precio-fechas" data-fechas>${fechasDe(b, mejor)}</div>
       </div>
       <div class="mini-grafica"><canvas data-grafica="${b.id}" aria-label="Evolución del precio"></canvas></div>
       <div class="busqueda-pie">
@@ -88,6 +93,8 @@ export async function vistaPanel(app) {
   const [busquedas, historial, avisos, perfil, datos] = await Promise.all([
     api.busquedas(), api.historialTodas(), api.avisosRecientes(), api.perfil(), aeropuertos(),
   ]);
+  // Fechas y horas de la mejor opción de cada búsqueda (si falla, el panel se ve igual sin ellas)
+  const mejores = new Map((await api.ultimosMejores(busquedas.map((b) => b.id)).catch(() => [])).map((p) => [p.busqueda, p]));
   const activas = busquedas.filter((b) => b.activa);
   const conPrecio = activas.filter((b) => b.precio_actual != null);
   const mejor = conPrecio.sort((x, y) => x.precio_actual - y.precio_actual)[0];
@@ -119,7 +126,7 @@ export async function vistaPanel(app) {
       </div>
 
       ${busquedas.length
-        ? `<div class="rejilla escalonado" style="margin-top:1.3rem" id="rejilla">${busquedas.map((b) => tarjetaBusqueda(b, datos)).join("")}</div>`
+        ? `<div class="rejilla escalonado" style="margin-top:1.3rem" id="rejilla">${busquedas.map((b) => tarjetaBusqueda(b, datos, mejores.get(b.id))).join("")}</div>`
         : `<div class="tarjeta vacio" style="margin-top:1.3rem">
              <div class="ilustracion">${icono("avion")}</div>
              <h2>Aún no vigilas ningún vuelo</h2>
@@ -174,12 +181,22 @@ export async function vistaPanel(app) {
     tarjeta.querySelector("[data-etiqueta]").textContent = etiquetaPrecio(b);
     if (antes != null && ahora != null && antes !== ahora) destello(tarjeta, ahora - antes);
     tarjeta.querySelector("[data-delta]").innerHTML = b.info?.variacion != null ? deltaHtml(b.info.variacion) : "";
+    const local = busquedas.find((x) => x.id === b.id);
+    if (local) Object.assign(local, b);
+    tarjeta.querySelector("[data-fechas]").innerHTML = fechasDe(b, mejores.get(b.id));
     tarjeta.querySelector("[data-estado]").textContent = b.estado || "";
     tarjeta.querySelector("[data-revisado]").textContent = b.activa ? `próxima ${hace(b.proxima_revision)}` : "en pausa";
   }));
   alSalir(api.suscribir("precios", ({ new: p }) => {
     tiempoRealActivo = true;
     if (!p || p.es_mejor === false) return;
+    // Revisión nueva: sus fechas y horas pasan a ser las del precio
+    if (p.fecha_ida && (p.detalle || p.ida)) {
+      mejores.set(p.busqueda, p);
+      const b = busquedas.find((x) => x.id === p.busqueda);
+      const caja = app.querySelector(`[data-id="${p.busqueda}"] [data-fechas]`);
+      if (b && caja) caja.innerHTML = fechasDe({ ...b, precio_actual: p.precio_total }, p);
+    }
     if (graficas.get(p.busqueda)) return graficas.get(p.busqueda).añadir(p);
     const b = busquedas.find((x) => x.id === p.busqueda);
     const canvas = app.querySelector(`[data-id="${p.busqueda}"] canvas`);

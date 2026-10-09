@@ -293,6 +293,37 @@ export function generarCodigo() {
 }
 
 /** Variación entre dos precios para mostrar ▼/▲. */
+/** Días entre dos fechas "AAAA-MM-DD…" (horas locales de cada aeropuerto, sin zonas). */
+const diasEntre = (a, b) => Math.round((Date.parse(String(b).slice(0, 10)) - Date.parse(String(a).slice(0, 10))) / 86400000);
+
+/**
+ * Fechas y horas de los vuelos que cuestan el precio mostrado (la mejor opción de la última revisión):
+ * IDA vie, 16 oct · 06:40–09:15 | VUELTA dom, 18 oct · 16:35–18:55 | 2 noches.
+ * Admite una fila de precios completa (con detalle) o una con solo ida/vuelta.
+ */
+export function fechasPrecioHtml(p) {
+  if (!p?.fecha_ida) return "";
+  const tramo = (etiqueta, dia, tr) => {
+    const t0 = tr?.tramos?.[0];
+    const t1 = tr?.tramos?.at(-1);
+    const escalas = tr?.tramos?.length ? (tr.tramos.length === 1 ? "directo" : `${tr.tramos.length - 1} escala${tr.tramos.length > 2 ? "s" : ""}`) : "";
+    const mas = t0 && t1 ? diasEntre(t0.salida, t1.llegada) : 0;
+    const horas = t0 && t1
+      ? `<span class="fp-horas" title="${escalas}">${horaLocal(t0.salida)}–${horaLocal(t1.llegada)}${mas > 0 ? `<sup>+${mas}</sup>` : ""}</span>`
+      : "";
+    return `<div class="fp-tramo"><span class="fp-etq">${etiqueta}</span><b class="fp-fecha">${esc(fecha(dia))}</b>${horas}</div>`;
+  };
+  const ida = p.ida ?? p.detalle?.ida;
+  const vuelta = p.vuelta ?? p.detalle?.vuelta;
+  const noches = p.fecha_vuelta ? diasEntre(p.fecha_ida, p.fecha_vuelta) : null;
+  return `
+    <div class="fp ${p.fecha_vuelta ? "" : "solo-ida"}" aria-label="Vuelos de este precio">
+      ${tramo("Ida", p.fecha_ida, ida)}
+      ${p.fecha_vuelta ? tramo("Vuelta", p.fecha_vuelta, vuelta) : ""}
+      ${noches !== null ? `<div class="fp-noches">${icono("luna")}${noches === 0 ? "Vuelves el mismo día" : `${noches} noche${noches === 1 ? "" : "s"}`}</div>` : ""}
+    </div>`;
+}
+
 export function deltaHtml(diferencia, { conIcono = true } = {}) {
   if (diferencia === null || diferencia === undefined || Number.isNaN(diferencia)) return "";
   const d = Math.round(diferencia * 100) / 100;
