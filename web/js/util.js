@@ -216,17 +216,8 @@ export function buscarAeropuertos(datos, texto, limite = 8) {
 // ---------------------------------------------------------------------------
 // Avisos en pantalla y confirmaciones
 // ---------------------------------------------------------------------------
-export function aviso(mensaje, tipo = "ok") {
-  const caja = $("#toasts");
-  const el = document.createElement("div");
-  el.className = `toast ${tipo === "error" ? "error" : ""}`;
-  el.innerHTML = `${icono(tipo === "error" ? "aviso" : "check")}<span>${esc(mensaje)}</span>`;
-  caja.append(el);
-  setTimeout(() => {
-    el.classList.add("saliendo");
-    setTimeout(() => el.remove(), 320);
-  }, tipo === "error" ? 6000 : 3200);
-}
+// Notificaciones al estilo de Sileo (ver notificaciones.js)
+export { aviso } from "./notificaciones.js";
 
 /** Ventana de confirmación bonita. Devuelve una promesa con true/false. */
 export function confirmar({ titulo, texto, aceptar = "Confirmar", peligro = true }) {

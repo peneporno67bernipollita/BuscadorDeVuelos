@@ -23,6 +23,12 @@ create table if not exists public.perfiles (
   ntfy_tema text,
   alarma_chollos boolean not null default false,
   alarma_prueba boolean not null default false,
+  -- Horario «solo Telegram»: en esas horas (de su zona horaria) la alarma del móvil no suena
+  ntfy_pausa boolean not null default false,
+  ntfy_pausa_desde time not null default '09:00',
+  ntfy_pausa_hasta time not null default '14:00',
+  ntfy_pausa_dias smallint[] not null default '{1,2,3,4,5,6,7}',
+  zona_horaria text not null default 'Europe/Madrid',
   perfil_completado boolean not null default false,
   creado timestamptz not null default now()
 );
@@ -400,6 +406,25 @@ begin
   if not exists (select 1 from pg_constraint where conname = 'perfiles_ntfy_tema_formato') then
     alter table public.perfiles add constraint perfiles_ntfy_tema_formato check (
       ntfy_tema is null or ntfy_tema ~ '^[A-Za-z0-9_-]{16,64}$');
+  end if;
+end;
+$$;
+
+-- =====================================================================
+-- Actualización v6: horario «solo Telegram» para la alarma del móvil
+-- (días 1 = lunes … 7 = domingo; si pasa de medianoche cuenta el día en que empieza)
+-- =====================================================================
+alter table public.perfiles add column if not exists ntfy_pausa boolean not null default false;
+alter table public.perfiles add column if not exists ntfy_pausa_desde time not null default '09:00';
+alter table public.perfiles add column if not exists ntfy_pausa_hasta time not null default '14:00';
+alter table public.perfiles add column if not exists ntfy_pausa_dias smallint[] not null default '{1,2,3,4,5,6,7}';
+alter table public.perfiles add column if not exists zona_horaria text not null default 'Europe/Madrid';
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'perfiles_ntfy_pausa_valida') then
+    alter table public.perfiles add constraint perfiles_ntfy_pausa_valida check (
+      ntfy_pausa_dias <@ array[1, 2, 3, 4, 5, 6, 7]::smallint[]
+      and zona_horaria ~ '^[A-Za-z0-9_+/-]{1,64}$');
   end if;
 end;
 $$;

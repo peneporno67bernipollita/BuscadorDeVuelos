@@ -28,6 +28,96 @@ const TIENDAS_NTFY = {
 /** Canal secreto de ntfy: hace de contraseña, así que es largo y aleatorio. */
 const nuevoTemaNtfy = () => `vuelos-${generarCodigo()}${generarCodigo()}`.toLowerCase();
 
+// ---- Horario «solo Telegram»: en esas horas la alarma del móvil no suena (Telegram sí) ----
+const DIAS_SEMANA = [[1, "L", "lunes"], [2, "M", "martes"], [3, "X", "miércoles"], [4, "J", "jueves"], [5, "V", "viernes"],
+  [6, "S", "sábado"], [7, "D", "domingo"]];
+const TODOS_LOS_DIAS = [1, 2, 3, 4, 5, 6, 7];
+const horaCorta = (t, defecto) => (t ? String(t).slice(0, 5) : defecto);
+const diasPausa = (p) => (Array.isArray(p.ntfy_pausa_dias) ? p.ntfy_pausa_dias.map(Number) : TODOS_LOS_DIAS);
+const zonaNavegador = () => {
+  try {
+    const zona = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return /^[A-Za-z0-9_+/-]{1,64}$/.test(zona || "") ? zona : "Europe/Madrid";
+  } catch {
+    return "Europe/Madrid";
+  }
+};
+
+/** ¿Está ahora en su horario «solo Telegram»? La misma regla que usa el robot (avisos.alarma_en_pausa). */
+function alarmaEnPausa(p, ahora = new Date()) {
+  if (!p.ntfy_pausa) return false;
+  const minutos = (t) => {
+    const [h, m] = String(t).split(":").map(Number);
+    return h * 60 + m;
+  };
+  const desde = minutos(horaCorta(p.ntfy_pausa_desde, "09:00"));
+  const hasta = minutos(horaCorta(p.ntfy_pausa_hasta, "14:00"));
+  const dias = diasPausa(p);
+  const t = ahora.getHours() * 60 + ahora.getMinutes();
+  const dia = ((ahora.getDay() + 6) % 7) + 1; // 1 = lunes … 7 = domingo
+  if (desde === hasta) return dias.includes(dia);
+  if (desde < hasta) return t >= desde && t < hasta && dias.includes(dia);
+  if (t >= desde) return dias.includes(dia);
+  return t < hasta && dias.includes(((dia + 5) % 7) + 1); // de madrugada: la pausa empezó el día anterior
+}
+
+function textoDias(dias) {
+  const orden = [...dias].sort((a, b) => a - b).join(",");
+  if (orden === "1,2,3,4,5,6,7") return "todos los días";
+  if (orden === "1,2,3,4,5") return "de lunes a viernes";
+  if (orden === "6,7") return "sábados y domingos";
+  const nombres = DIAS_SEMANA.filter(([n]) => dias.includes(n)).map(([, , nombre]) => nombre);
+  return nombres.length > 1 ? `${nombres.slice(0, -1).join(", ")} y ${nombres.at(-1)}` : `los ${nombres[0]}`;
+}
+
+/** "De 09:00 a 14:00, de lunes a viernes" */
+function textoHorario(p) {
+  const desde = horaCorta(p.ntfy_pausa_desde, "09:00");
+  const hasta = horaCorta(p.ntfy_pausa_hasta, "14:00");
+  const dias = diasPausa(p);
+  if (!dias.length) return "Sin ningún día marcado";
+  const cuando = desde === hasta ? "Todo el día" : `De ${desde} a ${hasta}`;
+  return `${cuando}, ${textoDias(dias)}`;
+}
+
+function resumenPausa(p) {
+  if (!p.ntfy_pausa) return "Desactivado: la alarma puede sonar a cualquier hora.";
+  const zona = p.zona_horaria && p.zona_horaria !== "Europe/Madrid" ? ` (hora de ${esc(p.zona_horaria)})` : "";
+  const ahora = !p.alarma_chollos
+    ? "la alarma está apagada"
+    : alarmaEnPausa(p) ? `${icono("telegram")}<b>ahora mismo, solo Telegram</b>` : `${icono("campana")}<b>ahora mismo, la alarma suena</b>`;
+  return `${esc(textoHorario(p))}${zona} · ${ahora}`;
+}
+
+function bloquePausa(perfil) {
+  if (!("ntfy_pausa" in perfil)) {
+    return `<div class="pausa-alarma"><div class="nota alerta">${icono("aviso")}<span>Para elegir un horario «solo Telegram» falta
+      actualizar la base de datos: en Supabase → SQL Editor pega todo <code>supabase/instalar.sql</code> y pulsa Run.</span></div></div>`;
+  }
+  const dias = diasPausa(perfil);
+  return `
+    <div class="pausa-alarma" id="pausa-alarma">
+      <div class="fila entre">
+        <h4>${icono("luna")}Horario solo Telegram</h4>
+        <label class="interruptor"><input type="checkbox" id="pausa-activa" ${perfil.ntfy_pausa ? "checked" : ""}><span class="pista"></span>Activado</label>
+      </div>
+      <p class="suave pequeno">En estas horas los chollos te llegan <b>solo por Telegram</b> y la alarma del móvil no suena.
+        Fuera de ellas suena como siempre.</p>
+      <fieldset class="pausa-campos" id="pausa-campos" aria-label="Horario solo Telegram" ${perfil.ntfy_pausa ? "" : "disabled"}>
+        <div class="pausa-horas">
+          <label>De <input type="time" id="pausa-desde" value="${horaCorta(perfil.ntfy_pausa_desde, "09:00")}" step="300" required></label>
+          <label>a <input type="time" id="pausa-hasta" value="${horaCorta(perfil.ntfy_pausa_hasta, "14:00")}" step="300" required></label>
+        </div>
+        <div class="pausa-dias" role="group" aria-label="Días de la semana">
+          ${DIAS_SEMANA.map(([n, letra, nombre]) => `<button type="button" class="dia-pausa" data-dia="${n}" aria-pressed="${dias.includes(n)}"
+            title="${nombre}" aria-label="${nombre}">${letra}</button>`).join("")}
+        </div>
+      </fieldset>
+      <p class="ayuda" id="pausa-resumen" aria-live="polite">${resumenPausa(perfil)}</p>
+      <p class="ayuda tenue">Si el horario pasa de medianoche (de 23:00 a 08:00), cuenta el día en que empieza.</p>
+    </div>`;
+}
+
 function notaAlarma() {
   return `<div class="nota">${icono("reloj")}<span>Alarma de prueba pedida: el robot la enviará en cuanto termine lo que está buscando (unos minutos).</span></div>`;
 }
@@ -68,6 +158,7 @@ function bloqueAlarma(perfil) {
       <div class="fila" style="margin-top:.6rem">
         <button class="primario" id="probar-alarma" ${perfil.alarma_prueba ? "disabled" : ""}>${icono("campana")}Probar alarma</button>
       </div>
+      ${bloquePausa(perfil)}
       <p class="pequeno tenue" style="margin-top:.7rem">El nombre del canal funciona como una contraseña: no lo compartas. ntfy.sh recibe el texto
         del aviso (nombre de la búsqueda y precio). En iPhone llega como notificación normal: no puede saltarse el "No molestar".</p>
     </div>`;
@@ -260,11 +351,51 @@ export async function vistaPerfil(app, primeraVez, alTerminar) {
     try {
       Object.assign(perfil, await api.guardarPerfil({ alarma_chollos: caja.checked }));
       aviso(caja.checked ? "Alarma activada para los chollazos" : "Alarma desactivada");
+      pintarResumenPausa();
     } catch (e) {
       caja.checked = !caja.checked;
       aviso(e.message, "error");
     }
   });
+  // --- Horario «solo Telegram»: se guarda solo al cambiar algo
+  const pintarResumenPausa = () => {
+    const resumen = $("#pausa-resumen");
+    if (resumen) resumen.innerHTML = resumenPausa(perfil);
+  };
+  let esperaPausa = null;
+  const guardarPausa = (retraso = 600) => {
+    clearTimeout(esperaPausa);
+    esperaPausa = setTimeout(async () => {
+      const campos = {
+        ntfy_pausa: $("#pausa-activa").checked,
+        ntfy_pausa_desde: $("#pausa-desde").value || "09:00",
+        ntfy_pausa_hasta: $("#pausa-hasta").value || "14:00",
+        ntfy_pausa_dias: [...app.querySelectorAll('.dia-pausa[aria-pressed="true"]')].map((b) => Number(b.dataset.dia)),
+        zona_horaria: zonaNavegador(),
+      };
+      try {
+        Object.assign(perfil, await api.guardarPerfil(campos));
+        pintarResumenPausa();
+        if (!campos.ntfy_pausa) aviso("Horario desactivado", "ok", { descripcion: "La alarma vuelve a sonar a cualquier hora." });
+        else if (!campos.ntfy_pausa_dias.length) aviso("Ningún día marcado", "alerta", { descripcion: "Marca al menos un día para que el horario sirva de algo." });
+        else aviso("Horario guardado", "ok", { descripcion: `${textoHorario(perfil)}: los chollos te llegan solo por Telegram.` });
+      } catch (e) {
+        aviso(e.message, "error");
+      }
+    }, retraso);
+  };
+  $("#pausa-activa")?.addEventListener("change", (ev) => {
+    $("#pausa-campos").disabled = !ev.currentTarget.checked;
+    guardarPausa(0);
+  });
+  $("#pausa-desde")?.addEventListener("change", () => guardarPausa());
+  $("#pausa-hasta")?.addEventListener("change", () => guardarPausa());
+  app.querySelectorAll(".dia-pausa").forEach((boton) =>
+    boton.addEventListener("click", () => {
+      boton.setAttribute("aria-pressed", String(boton.getAttribute("aria-pressed") !== "true"));
+      guardarPausa();
+    }));
+
   $("#copiar-tema")?.addEventListener("click", async () => {
     try {
       await navigator.clipboard.writeText(perfil.ntfy_tema);
@@ -320,8 +451,9 @@ export async function vistaPerfil(app, primeraVez, alTerminar) {
       if (boton) boton.disabled = false;
     }
   });
-  // El estado del robot (en marcha o no) se refresca cada minuto
+  // El estado del robot (en marcha o no) y el del horario «solo Telegram» se refrescan cada minuto
   cadaSegundos(60, async () => {
+    pintarResumenPausa();
     const nuevo = await api.latido().catch(() => null);
     const nota = $("#telegram [data-robot]");
     if (nota) nota.outerHTML = notaRobot(nuevo);

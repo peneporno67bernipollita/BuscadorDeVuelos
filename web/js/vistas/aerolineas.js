@@ -121,7 +121,7 @@ export async function vistaAerolineas(app) {
       await conCarga(boton, api.guardarAerolinea(datos));
       boton.classList.remove("primario");
       tr.classList.toggle("bloqueada", !datos.permitida);
-      aviso(`${datos.nombre}: guardada${datos.permitida ? "" : " (desactivada)"}`);
+      aviso(`${datos.nombre} guardada${datos.permitida ? "" : " (desactivada)"}`);
       contadores();
     } catch (e) {
       aviso(e.message, "error");

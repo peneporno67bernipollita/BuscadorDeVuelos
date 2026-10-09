@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import html
 import logging
+from datetime import datetime, time, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 
@@ -11,6 +13,7 @@ from . import aeropuertos
 from .decision import Decision
 from .filtros import aeropuertos_busqueda
 from .modelos import Opcion, Trayecto
+from .tiempo import ZONA
 
 log = logging.getLogger(__name__)
 
@@ -170,6 +173,45 @@ def alarma(tema: str, titulo: str, texto: str, enlace: str | None = None,
 
 def texto_alarma(b: dict, total: float, motivo: str = "") -> str:
     return f"{b['nombre']}: {eur(total)} en total. {motivo} Toca para verlo o pulsa Comprar ya.".replace("  ", " ")
+
+
+NOTA_PAUSA = "🔕 <i>La alarma del móvil está en pausa por tu horario «solo Telegram»: este aviso solo te llega aquí.</i>"
+
+
+def _hora(valor, defecto: time) -> time:
+    """"08:30" o "08:30:00" (así devuelve Supabase las columnas time) → time(8, 30)."""
+    try:
+        h, m = str(valor).split(":")[:2]
+        return time(int(h), int(m))
+    except (TypeError, ValueError):
+        return defecto
+
+
+def alarma_en_pausa(perfil: dict, ahora: datetime | None = None) -> bool:
+    """¿Es una de las horas en las que el usuario quiere los avisos solo por Telegram (sin alarma en el móvil)?
+
+    Las horas son las de su zona horaria (la de su navegador; España si no hay). Si el horario pasa de
+    medianoche (de 23:00 a 08:00), cuenta el día en que empieza. Si "desde" y "hasta" coinciden, todo el día.
+    """
+    if not perfil.get("ntfy_pausa"):
+        return False
+    try:
+        zona = ZoneInfo(perfil.get("zona_horaria") or "Europe/Madrid")
+    except (ZoneInfoNotFoundError, ValueError):
+        zona = ZONA
+    local = (ahora or datetime.now(timezone.utc)).astimezone(zona)
+    desde = _hora(perfil.get("ntfy_pausa_desde"), time(9))
+    hasta = _hora(perfil.get("ntfy_pausa_hasta"), time(14))
+    dias = perfil.get("ntfy_pausa_dias")
+    dias = set(range(1, 8)) if dias is None else set(dias)
+    t, dia = local.time(), local.isoweekday()
+    if desde == hasta:
+        return dia in dias
+    if desde < hasta:
+        return desde <= t < hasta and dia in dias
+    if t >= desde:
+        return dia in dias
+    return t < hasta and (dia - 2) % 7 + 1 in dias  # de madrugada: la pausa empezó el día anterior
 
 
 LIMITE_TELEGRAM = 4000  # Telegram admite 4096 caracteres por mensaje

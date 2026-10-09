@@ -198,3 +198,55 @@ def test_busqueda_nueva_no_espera_al_ritmo_normal_de_la_web():
     assert run.fuentes_listas(config, [vieja, nueva], ahora, forzar=False) == ["google_flights"]
     assert run.fuentes_listas(config, [editada], ahora, forzar=False) == ["google_flights"]
     assert not run.es_nueva(vieja) and run.es_nueva(nueva) and run.es_nueva(editada)
+
+
+def test_horario_solo_telegram_para_la_alarma():
+    from buscador.avisos import alarma_en_pausa
+
+    madrid = lambda d, h, m=0: datetime(2026, 10, d, h, m, tzinfo=timezone(timedelta(hours=2)))  # 12/10/2026 = lunes
+    base = {"ntfy_pausa": True, "ntfy_pausa_desde": "09:00:00", "ntfy_pausa_hasta": "14:00:00",
+            "ntfy_pausa_dias": [1, 2, 3, 4, 5], "zona_horaria": "Europe/Madrid"}
+    assert alarma_en_pausa(base, madrid(12, 10)) is True          # lunes 10:00
+    assert alarma_en_pausa(base, madrid(12, 14)) is False         # a las 14:00 ya suena
+    assert alarma_en_pausa(base, madrid(12, 8, 59)) is False
+    assert alarma_en_pausa(base, madrid(11, 10)) is False         # domingo: no está entre los días
+    assert alarma_en_pausa({**base, "ntfy_pausa": False}, madrid(12, 10)) is False
+    # Las horas son las de su zona, aunque el robot trabaje en UTC
+    assert alarma_en_pausa(base, datetime(2026, 10, 12, 7, 30, tzinfo=timezone.utc)) is True  # 9:30 en Madrid
+    assert alarma_en_pausa({**base, "zona_horaria": "Atlantic/Canary"},
+                           datetime(2026, 10, 12, 7, 30, tzinfo=timezone.utc)) is False      # 8:30 en Canarias
+    assert alarma_en_pausa({**base, "zona_horaria": "Marte/Base"}, madrid(12, 10)) is True  # zona rara: España
+
+    # De noche, pasando de medianoche: cuenta el día en que empieza
+    noche = {**base, "ntfy_pausa_desde": "23:00", "ntfy_pausa_hasta": "08:00"}
+    assert alarma_en_pausa(noche, madrid(16, 23, 30)) is True     # viernes noche
+    assert alarma_en_pausa(noche, madrid(17, 7)) is True          # sábado de madrugada (empezó el viernes)
+    assert alarma_en_pausa(noche, madrid(18, 7)) is False         # domingo de madrugada (empezó el sábado)
+    assert alarma_en_pausa(noche, madrid(13, 7)) is True          # martes de madrugada (empezó el lunes)
+    assert alarma_en_pausa(noche, madrid(13, 12)) is False
+    assert alarma_en_pausa({**base, "ntfy_pausa_hasta": "09:00"}, madrid(11, 3)) is False  # domingo
+    assert alarma_en_pausa({**base, "ntfy_pausa_hasta": "09:00"}, madrid(12, 3)) is True   # lunes: todo el día
+    assert alarma_en_pausa({**base, "ntfy_pausa_dias": []}, madrid(12, 10)) is False
+
+
+def test_en_horario_solo_telegram_avisa_por_telegram_sin_alarma(monkeypatch):
+    from collections import Counter
+
+    from test_logica import busqueda, opcion_directa
+
+    from buscador.decision import Decision
+
+    alarmas = []
+    monkeypatch.setattr(run, "alarma", lambda *a, **k: alarmas.append(a) or True)
+    monkeypatch.setattr(run, "decidir", lambda *a, **k: Decision(True, "chollo", "🔥 ¡Chollo encontrado! −40 %", "x", True))
+    perfil = {"id": "u1", "telegram_chat_id": "99", "ntfy_tema": "vuelos-secreto123", "alarma_chollos": True,
+              "ntfy_pausa": True, "ntfy_pausa_desde": "00:00", "ntfy_pausa_hasta": "00:00", "ntfy_pausa_dias": [1, 2, 3, 4, 5, 6, 7]}
+    for pausa, esperadas in ((True, 0), (False, 1)):
+        db, tg = BaseDeDatosFalsa({"busquedas": [busqueda()], "precios": [], "avisos": []}), TelegramFalso([])
+        ahora, op = datetime.now(timezone.utc), opcion_directa()
+        op.precio_total = 120.0
+        run.procesar_busqueda(db, db.leer("busquedas")[0], [op], Counter(), [], ["google"],
+                              {**perfil, "ntfy_pausa": pausa}, {}, tg, None, ahora.date(), ahora)
+        assert len(tg.enviados) == 1 and ("en pausa" in tg.enviados[0][1]) is pausa
+        assert len(alarmas) == esperadas
+        alarmas.clear()

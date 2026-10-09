@@ -26,8 +26,8 @@ from datetime import date, datetime, timedelta, timezone
 
 from . import enlaces
 from .avisos import (
-    AYUDA, MENSAJE_PRUEBA, TIPOS_ALARMA, Telegram, alarma, codigo_en_mensaje, eur, mensaje_aviso, mensaje_estado,
-    texto_alarma,
+    AYUDA, MENSAJE_PRUEBA, NOTA_PAUSA, TIPOS_ALARMA, Telegram, alarma, alarma_en_pausa, codigo_en_mensaje, eur,
+    mensaje_aviso, mensaje_estado, texto_alarma,
 )
 from .db import Supabase
 from .decision import decidir, minutos_hasta_siguiente_revision
@@ -354,9 +354,15 @@ def procesar_busqueda(
             comprar=enlaces.comprar_ya(b, mejor),
             mismo_aeropuerto=next((o for o in validas if not o.vuelta_a_otro_aeropuerto), None),
         )
-        chat = (perfil or {}).get("telegram_chat_id")
+        perfil = perfil or {}
+        con_alarma = decision.tipo in TIPOS_ALARMA and perfil.get("alarma_chollos") and perfil.get("ntfy_tema")
+        # En su horario «solo Telegram» el móvil no suena: el aviso llega solo por Telegram (y se lo decimos)
+        if con_alarma and alarma_en_pausa(perfil, ahora):
+            con_alarma = False
+            texto += "\n\n" + NOTA_PAUSA
+        chat = perfil.get("telegram_chat_id")
         entregado = bool(tg and chat and tg.enviar(chat, texto))
-        if decision.tipo in TIPOS_ALARMA and (perfil or {}).get("alarma_chollos") and (perfil or {}).get("ntfy_tema"):
+        if con_alarma:
             alarma(perfil["ntfy_tema"], decision.titulo, texto_alarma(b, mejor.precio_total, decision.motivo),
                    enlace=f"{url_web.rstrip('/')}/#/busqueda/{b['id']}" if url_web else None,
                    comprar=enlaces.comprar_ya(b, mejor))

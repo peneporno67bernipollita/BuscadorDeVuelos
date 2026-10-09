@@ -23,6 +23,12 @@ create table if not exists public.perfiles (
   ntfy_tema text,
   alarma_chollos boolean not null default false,
   alarma_prueba boolean not null default false,
+  -- Horario «solo Telegram»: en esas horas (de su zona horaria) la alarma del móvil no suena
+  ntfy_pausa boolean not null default false,
+  ntfy_pausa_desde time not null default '09:00',
+  ntfy_pausa_hasta time not null default '14:00',
+  ntfy_pausa_dias smallint[] not null default '{1,2,3,4,5,6,7}',
+  zona_horaria text not null default 'Europe/Madrid',
   perfil_completado boolean not null default false,
   creado timestamptz not null default now()
 );
@@ -404,6 +410,25 @@ begin
 end;
 $$;
 
+-- =====================================================================
+-- Actualización v6: horario «solo Telegram» para la alarma del móvil
+-- (días 1 = lunes … 7 = domingo; si pasa de medianoche cuenta el día en que empieza)
+-- =====================================================================
+alter table public.perfiles add column if not exists ntfy_pausa boolean not null default false;
+alter table public.perfiles add column if not exists ntfy_pausa_desde time not null default '09:00';
+alter table public.perfiles add column if not exists ntfy_pausa_hasta time not null default '14:00';
+alter table public.perfiles add column if not exists ntfy_pausa_dias smallint[] not null default '{1,2,3,4,5,6,7}';
+alter table public.perfiles add column if not exists zona_horaria text not null default 'Europe/Madrid';
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'perfiles_ntfy_pausa_valida') then
+    alter table public.perfiles add constraint perfiles_ntfy_pausa_valida check (
+      ntfy_pausa_dias <@ array[1, 2, 3, 4, 5, 6, 7]::smallint[]
+      and zona_horaria ~ '^[A-Za-z0-9_+/-]{1,64}$');
+  end if;
+end;
+$$;
+
 -- Que la API de Supabase vea al momento las columnas nuevas
 notify pgrst, 'reload schema';
 
@@ -490,7 +515,7 @@ insert into public.aerolineas (codigo, nombre, permitida, criterio, web_oficial,
   ('H2', 'SKY Airline', true, 'AirlineRatings 2026: top 25 low cost (nº25)', 'https://www.skyairline.com', 50, 80, 80, 80, 'tramo', null, 'La tarifa básica solo incluye un bolso pequeño; maletas = máximo publicado (estimación).')
 on conflict (codigo) do nothing;
 
--- Comprobación final (debe salir: 8 tablas, 77 aerolíneas, 3 webs, versión 2 = 1, versión 3 = 2, versión 5 = 3)
+-- Comprobación final (debe salir: 8 tablas, 77 aerolíneas, 3 webs, versión 2 = 1, versión 3 = 2, versión 5 = 3, versión 6 = 5)
 select 'Tablas creadas' as comprobacion, count(*) as total from information_schema.tables
   where table_schema = 'public' and table_name in
   ('perfiles','busquedas','precios','avisos','aerolineas','estado_fuentes','ejecuciones','ajustes')
@@ -502,4 +527,7 @@ union all select 'Versión 3 instalada (varios aeropuertos)', count(*) from info
   where table_schema = 'public' and table_name = 'busquedas' and column_name in ('origenes_extra', 'destinos_extra')
 union all select 'Versión 5 instalada (alarma en el móvil)', count(*) from information_schema.columns
   where table_schema = 'public' and table_name = 'perfiles'
-  and column_name in ('ntfy_tema', 'alarma_chollos', 'alarma_prueba');
+  and column_name in ('ntfy_tema', 'alarma_chollos', 'alarma_prueba')
+union all select 'Versión 6 instalada (horario solo Telegram)', count(*) from information_schema.columns
+  where table_schema = 'public' and table_name = 'perfiles'
+  and column_name in ('ntfy_pausa', 'ntfy_pausa_desde', 'ntfy_pausa_hasta', 'ntfy_pausa_dias', 'zona_horaria');

@@ -13,6 +13,7 @@ const ERRORES = [
   [/password should be at least/i, "La contraseña debe tener al menos 6 caracteres."],
   [/rate limit/i, "Demasiados intentos seguidos. Espera unos minutos."],
   [/origenes_extra|destinos_extra|busquedas_extras_max/i, "Para usar varios aeropuertos falta actualizar la base de datos: en Supabase → SQL Editor pega todo supabase/instalar.sql y pulsa Run."],
+  [/ntfy_pausa|zona_horaria/i, "Para el horario solo Telegram falta actualizar la base de datos: en Supabase → SQL Editor pega todo supabase/instalar.sql y pulsa Run."],
   [/ntfy_tema|alarma_chollos|alarma_prueba/i, "Para la alarma falta actualizar la base de datos: en Supabase → SQL Editor pega todo supabase/instalar.sql y pulsa Run."],
   [/violates check constraint/i, "Algún dato no es válido. Revisa el formulario."],
   [/telegram_prueba/i, "Falta actualizar la base de datos: en Supabase → SQL Editor pega todo supabase/instalar.sql y pulsa Run."],
