@@ -148,18 +148,48 @@ def escribir_latido(db: Supabase, modo: str, hasta: datetime | None) -> None:
 # ----------------------------------------------------------------------------------------
 # Telegram
 # ----------------------------------------------------------------------------------------
+class Limitador:
+    """Cuántas veces se permite algo por clave en una ventana de tiempo (en memoria: el robot vive horas)."""
+
+    def __init__(self, maximo: int, ventana_s: float):
+        self.maximo, self.ventana_s = maximo, ventana_s
+        self.marcas: dict[str, list[float]] = {}
+
+    def permitir(self, clave: str, ahora: float | None = None) -> bool:
+        ahora = time.monotonic() if ahora is None else ahora
+        marcas = [t for t in self.marcas.get(clave, []) if ahora - t < self.ventana_s]
+        permitido = len(marcas) < self.maximo
+        if permitido:
+            marcas.append(ahora)
+        self.marcas[clave] = marcas
+        if len(self.marcas) > 10_000:  # miles de chats distintos no llenan la memoria
+            self.marcas = {k: v for k, v in self.marcas.items() if v and ahora - v[-1] < self.ventana_s}
+        return permitido
+
+
+# El bot es público: cualquiera puede escribirle. Un chat que no es el tuyo puede mandar 5 mensajes por hora
+# (adivinar un código de vinculación es imposible) y el bot contesta a desconocidos 30 veces por hora como
+# mucho, así nadie puede usarlo para saturarlo. Tu chat vinculado: hasta 30 órdenes por minuto.
+LIMITE_DESCONOCIDO = Limitador(5, 3600)
+LIMITE_RESPUESTAS_DESCONOCIDOS = Limitador(30, 3600)
+LIMITE_VINCULADO = Limitador(30, 60)
+
+
 def atender_telegram(db: Supabase, tg: Telegram, perfiles: dict[str, dict], url_web: str | None, espera: int = 0) -> int:
     """Vincula chats con el código de la web, responde a /estado y /ayuda y envía mensajes de prueba."""
     offset = _ajuste(db, "telegram_offset")
     codigos = {p["telegram_codigo"].upper(): p for p in perfiles.values() if p.get("telegram_codigo")}
     por_chat = {str(p["telegram_chat_id"]): p for p in perfiles.values() if p.get("telegram_chat_id")}
-    ultimo, vinculados = offset, 0
+    ultimo, vinculados, ignorados = offset, 0, 0
     for m in tg.mensajes_nuevos(offset, espera):
         ultimo = m["update_id"]
         mensaje = m.get("message") or {}
         chat = (mensaje.get("chat") or {}).get("id")
         texto = (mensaje.get("text") or "").strip()
         if not chat:
+            continue
+        if not (LIMITE_VINCULADO if str(chat) in por_chat else LIMITE_DESCONOCIDO).permitir(str(chat)):
+            ignorados += 1
             continue
         codigo = codigo_en_mensaje(texto)
         if codigo in codigos:
@@ -178,8 +208,11 @@ def atender_telegram(db: Supabase, tg: Telegram, perfiles: dict[str, dict], url_
                 tg.enviar(chat, "✅ Este chat ya está vinculado. Aquí te llegarán los avisos.\n\n" + AYUDA)
             else:
                 tg.enviar(chat, AYUDA)
-        elif texto.startswith("/start"):
+        elif texto.startswith("/start") and LIMITE_RESPUESTAS_DESCONOCIDOS.permitir("*"):
             tg.enviar(chat, "Hola 👋 Para vincular este chat envíame el código que aparece en tu web (Perfil → Telegram).")
+    if ignorados:
+        # Sin el número de chat: el registro de GitHub es público
+        log.warning("Telegram: %d mensajes ignorados por exceso (alguien insiste demasiado con el bot)", ignorados)
     if ultimo != offset:
         db.guardar("ajustes", {"clave": "telegram_offset", "valor": ultimo})
 

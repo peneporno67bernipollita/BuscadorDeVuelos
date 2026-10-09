@@ -120,6 +120,8 @@ def compra(busqueda: dict, opcion: Opcion, aerolineas: dict[str, dict]) -> list[
         else:
             vistos.add(codigo)
             url = a.get("web_oficial") or ""
+            if not url.startswith("https://"):  # nunca javascript: ni similares
+                url = ""
             nombre = a.get("nombre", codigo)
         if url and all(e["url"] != url for e in enlaces):
             enlaces.append({"aerolinea": nombre, "url": url})

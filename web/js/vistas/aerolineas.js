@@ -1,6 +1,6 @@
 import { api } from "../api.js";
 import { icono } from "../iconos.js";
-import { $, aviso, conCarga, contarHasta, esc } from "../util.js";
+import { $, aviso, conCarga, contarHasta, esc, esHttps } from "../util.js";
 
 const NUMEROS = ["cabina_max", "facturada_nacional_max", "facturada_europa_max", "facturada_largo_max"];
 
@@ -116,6 +116,8 @@ export async function vistaAerolineas(app) {
       const c = el.dataset.campo;
       datos[c] = el.type === "checkbox" ? el.checked : NUMEROS.includes(c) ? Number(el.value || 0) : el.value.trim();
     });
+    datos.web_oficial = datos.web_oficial || null;
+    if (datos.web_oficial && !esHttps(datos.web_oficial)) return aviso("La web oficial tiene que empezar por https://", "error");
     const boton = tr.querySelector("[data-guardar]");
     try {
       await conCarga(boton, api.guardarAerolinea(datos));
@@ -144,10 +146,12 @@ export async function vistaAerolineas(app) {
     const codigo = $("#n-codigo").value.trim().toUpperCase();
     if (!/^[A-Z0-9]{2}$/.test(codigo)) return aviso("El código IATA son 2 letras o números (p. ej. IB)", "error");
     if (lista.some((a) => a.codigo === codigo)) return aviso("Esa aerolínea ya está en la lista", "error");
+    const web = $("#n-web").value.trim();
+    if (web && !esHttps(web)) return aviso("La web oficial tiene que empezar por https://", "error");
     try {
       await conCarga(ev.submitter, api.guardarAerolinea({
         codigo, nombre: $("#n-nombre").value.trim() || codigo, permitida: true,
-        web_oficial: $("#n-web").value.trim() || null, criterio: $("#n-criterio").value.trim() || "Añadida por ti",
+        web_oficial: web || null, criterio: $("#n-criterio").value.trim() || "Añadida por ti",
         cabina_max: 60, facturada_nacional_max: 130, facturada_europa_max: 130, facturada_largo_max: 150, cobra_por: "tramo",
       }));
       aviso("Aerolínea añadida con precios de maletas prudentes: ajústalos si los conoces");

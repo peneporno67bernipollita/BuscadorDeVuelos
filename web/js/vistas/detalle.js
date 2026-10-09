@@ -3,7 +3,7 @@ import { graficaPrecios } from "../graficas.js";
 import { icono } from "../iconos.js";
 import {
   $, aeropuertos, aeropuertosDe, alSalir, animarTableros, tablero, aviso, cadaSegundos, confirmar, contarHasta, cuentaAtras, deltaHtml, destello, esc, eur,
-  fecha, fechaHora, fechasPrecioHtml, fechasTexto, hace, horaLocal, limpiarPantalla, maletasTexto, pasajerosTexto,
+  esHttps, fecha, fechaHora, fechasPrecioHtml, fechasTexto, hace, horaLocal, limpiarPantalla, maletasTexto, pasajerosTexto,
 } from "../util.js";
 
 const NOMBRE_FUENTE = { google_flights: "Google Flights", ryanair: "Ryanair", skyscanner: "Skyscanner" };
@@ -50,7 +50,7 @@ function botonesComprar(p, { grande = false } = {}) {
   const clase = `boton primario ${grande ? "" : "pequeno"}`;
   if (d.comprar?.length) {
     return d.comprar.map((e) =>
-      `<a class="${clase}" href="${esc(e.url)}" target="_blank" rel="noopener">${icono("etiqueta")}${esc(e.texto)}</a>`).join("");
+      esHttps(e.url) ? `<a class="${clase}" href="${esc(e.url)}" target="_blank" rel="noopener">${icono("etiqueta")}${esc(e.texto)}</a>` : "").join("");
   }
   return d.google_flights
     ? `<a class="${clase}" href="${esc(d.google_flights)}" target="_blank" rel="noopener">${icono("etiqueta")}Ver en Google Flights</a>` : "";
@@ -66,7 +66,7 @@ function vueltaAOtro(d) {
 function tarjetaVuelo(p, aerolineas, esMejor) {
   const d = p.detalle || {};
   const enlaces = (d.enlaces || []).map((e) =>
-    `<a class="boton pequeno" href="${esc(e.url)}" target="_blank" rel="noopener">${icono("externo")}${esc(e.aerolinea)}</a>`).join("");
+    esHttps(e.url) ? `<a class="boton pequeno" href="${esc(e.url)}" target="_blank" rel="noopener">${icono("externo")}${esc(e.aerolinea)}</a>` : "").join("");
   return `
     <div class="vuelo ${esMejor ? "mejor" : ""}">
       <div class="vuelo-cabecera">

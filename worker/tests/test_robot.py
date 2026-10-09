@@ -2,7 +2,15 @@
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from buscador import run
+
+
+@pytest.fixture(autouse=True)
+def limites_de_telegram_limpios():
+    for limite in (run.LIMITE_DESCONOCIDO, run.LIMITE_RESPUESTAS_DESCONOCIDOS, run.LIMITE_VINCULADO):
+        limite.marcas.clear()
 
 
 class BaseDeDatosFalsa:
@@ -250,3 +258,24 @@ def test_en_horario_solo_telegram_avisa_por_telegram_sin_alarma(monkeypatch):
         assert len(tg.enviados) == 1 and ("en pausa" in tg.enviados[0][1]) is pausa
         assert len(alarmas) == esperadas
         alarmas.clear()
+
+
+def test_el_bot_limita_a_los_desconocidos():
+    db = BaseDeDatosFalsa({"perfiles": [{"id": "u1", "telegram_codigo": "ABCD2345", "telegram_chat_id": None}], "ajustes": []})
+    # Alguien prueba códigos al azar: tras 5 intentos en una hora se le ignora, aunque luego acierte
+    tg = TelegramFalso([_mensaje(i, 555, f"/start ZZZZ{i:04d}") for i in range(1, 8)] + [_mensaje(8, 555, "/start ABCD2345")])
+    assert run.atender_telegram(db, tg, {p["id"]: p for p in db.leer("perfiles")}, None) == 0
+    assert len(tg.enviados) == 5
+    assert db.leer("perfiles")[0]["telegram_chat_id"] is None
+    # Pasada la hora puede volver a intentarlo
+    limite = run.Limitador(2, 60)
+    assert limite.permitir("x", 0) and limite.permitir("x", 1) and not limite.permitir("x", 2)
+    assert limite.permitir("x", 61)
+
+
+def test_enlaces_de_telegram_seguros():
+    from buscador.avisos import _href, es_https
+
+    assert es_https("https://www.iberia.com") and not es_https("javascript:alert(1)") and not es_https("http://x.com")
+    assert not es_https('https://x.com/"><b>')
+    assert _href('https://x.com/?a="b"&c=<d>') == "https://x.com/?a=&quot;b&quot;&amp;c=&lt;d&gt;"

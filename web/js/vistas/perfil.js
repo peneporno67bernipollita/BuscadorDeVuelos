@@ -265,7 +265,7 @@ export async function vistaPerfil(app, primeraVez, alTerminar) {
           <form id="form-pass" class="tarjeta" novalidate>
             <div class="tarjeta-titulo"><h2>${icono("candado")}Cambiar contraseña</h2></div>
             <div class="fila" style="align-items:flex-start">
-              <input id="nueva-pass" type="password" minlength="6" placeholder="Nueva contraseña (mínimo 6)" autocomplete="new-password" style="flex:1;min-width:200px">
+              <input id="nueva-pass" type="password" minlength="10" placeholder="Nueva contraseña (mínimo 10)" autocomplete="new-password" style="flex:1;min-width:200px">
               <button type="submit">${icono("candado")}Cambiar</button>
             </div>
           </form>`}
@@ -295,7 +295,7 @@ export async function vistaPerfil(app, primeraVez, alTerminar) {
   $("#form-pass")?.addEventListener("submit", async (ev) => {
     ev.preventDefault();
     const pass = $("#nueva-pass").value;
-    if (pass.length < 6) return aviso("La contraseña necesita al menos 6 caracteres", "error");
+    if (pass.length < 10) return aviso("La contraseña necesita al menos 10 caracteres", "error");
     try {
       await conCarga(ev.submitter, api.cambiarPassword(pass));
       $("#nueva-pass").value = "";

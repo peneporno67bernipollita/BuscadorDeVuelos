@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 import logging
+import re
 from datetime import datetime, time, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -31,6 +32,16 @@ def _fecha(d) -> str:
 
 def _e(texto) -> str:
     return html.escape(str(texto), quote=False)
+
+
+def es_https(url) -> bool:
+    """Solo se enlaza a direcciones https:// (la web oficial de una aerolínea la puedes editar tú)."""
+    return bool(re.fullmatch(r"https://[^\s\"'<>]+", str(url or "")))
+
+
+def _href(url) -> str:
+    """Dirección dentro de href="...": con las comillas escapadas, para que no pueda romper el mensaje."""
+    return html.escape(str(url), quote=True)
 
 
 def _linea_trayecto(etiqueta: str, tr: Trayecto, aerolineas: dict[str, dict]) -> str:
@@ -127,13 +138,13 @@ def mensaje_aviso(
     if comprar:
         lineas += ["", "🛒 <b>Comprar ya (Google Flights, con estos vuelos elegidos):</b>"]
         for e in comprar:
-            lineas.append(f'👉 <a href="{_e(e["url"])}">{_e(e["texto"])}</a>')
+            lineas.append(f'👉 <a href="{_href(e["url"])}">{_e(e["texto"])}</a>')
     lineas += ["", "🏢 <b>O en la web oficial:</b>"]
-    for e in enlaces_compra:
-        lineas.append(f'• <a href="{_e(e["url"])}">{_e(e["aerolinea"])}</a>')
-    lineas.append(f'🔎 <a href="{_e(enlace_google)}">Ver los más baratos en Google Flights</a>')
+    for e in (x for x in enlaces_compra if es_https(x["url"])):
+        lineas.append(f'• <a href="{_href(e["url"])}">{_e(e["aerolinea"])}</a>')
+    lineas.append(f'🔎 <a href="{_href(enlace_google)}">Ver los más baratos en Google Flights</a>')
     if url_web:
-        lineas.append(f'📈 <a href="{_e(url_web)}">Historial en tu web</a>')
+        lineas.append(f'📈 <a href="{_href(url_web)}">Historial en tu web</a>')
     lineas.append("Revisa el precio final en la web antes de pagar: puede cambiar en cualquier momento.")
     return unir_sin_pasarse(lineas)
 
@@ -259,7 +270,7 @@ def mensaje_estado(busquedas: list[dict], url_web: str | None) -> str:
             precio = "💶 sin precio todavía"
         lineas += [f"<b>{_e(b['nombre'])}</b>", _e(ruta), precio, f"ℹ️ {_e(b.get('estado') or 'Pendiente')}", ""]
     if url_web:
-        lineas.append(f'📈 <a href="{_e(url_web)}">Abrir tu web</a>')
+        lineas.append(f'📈 <a href="{_href(url_web)}">Abrir tu web</a>')
     return unir_sin_pasarse(lineas)
 
 

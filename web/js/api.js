@@ -15,6 +15,9 @@ const ERRORES = [
   [/origenes_extra|destinos_extra|busquedas_extras_max/i, "Para usar varios aeropuertos falta actualizar la base de datos: en Supabase → SQL Editor pega todo supabase/instalar.sql y pulsa Run."],
   [/ntfy_pausa|zona_horaria/i, "Para el horario solo Telegram falta actualizar la base de datos: en Supabase → SQL Editor pega todo supabase/instalar.sql y pulsa Run."],
   [/ntfy_tema|alarma_chollos|alarma_prueba/i, "Para la alarma falta actualizar la base de datos: en Supabase → SQL Editor pega todo supabase/instalar.sql y pulsa Run."],
+  [/jwt expired|permission denied for (table|relation|sequence)|no autorizado/i, "Tu sesión ha caducado: vuelve a entrar."],
+  [/telegram solo se vincula/i, "El chat de Telegram solo se vincula enviando el código al bot."],
+  [/aerolineas_web_https/i, "La web oficial tiene que empezar por https://"],
   [/violates check constraint/i, "Algún dato no es válido. Revisa el formulario."],
   [/telegram_prueba/i, "Falta actualizar la base de datos: en Supabase → SQL Editor pega todo supabase/instalar.sql y pulsa Run."],
   [/failed to fetch|network/i, "No hay conexión con la base de datos. Revisa tu internet."],
@@ -35,7 +38,8 @@ const haceDias = (dias) => new Date(Date.now() - dias * 86400000).toISOString();
 const MAX_FILAS = 1000; // Supabase devuelve como mucho 1000 filas por petición
 
 async function crearReal() {
-  const { createClient } = await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm");
+  // Versión fija: una actualización del CDN no puede cambiar el código que maneja tu sesión sin que lo sepas
+  const { createClient } = await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.3/+esm");
   const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
   const usuario = async () => (await sb.auth.getSession()).data.session?.user ?? null;
   const volverAqui = location.origin + location.pathname;

@@ -25,9 +25,9 @@ Todo es gratis. Tardarás unos 30 minutos. Necesitas:
    Debe terminar con *Success*. Se puede volver a ejecutar sin problema; **hazlo tras cada actualización**
    (la versión 2 añade el tiempo real de la web, la señal de vida del robot y el mensaje de prueba de Telegram;
    la versión 3, varios aeropuertos de salida y de llegada por búsqueda; la versión 5, la alarma en el móvil;
-   la versión 6, el horario «solo Telegram» de la alarma).
-   La tabla final debe decir "Versión 2 instalada" = 1, "Versión 3 instalada" = 2, "Versión 5 instalada" = 3
-   y "Versión 6 instalada" = 5.
+   la versión 6, el horario «solo Telegram» de la alarma; la versión 7, seguridad reforzada).
+   La tabla final debe decir "Versión 2 instalada" = 1, "Versión 3 instalada" = 2, "Versión 5 instalada" = 3,
+   "Versión 6 instalada" = 5 y "Versión 7 instalada" = 6.
 5. Apunta estos tres datos:
    - **Project URL** (en **Project Settings → Data API**): algo como `https://abcdxyz.supabase.co`.
    - **Publishable key** (en **Project Settings → API Keys**): empieza por `sb_publishable_`. Es pública y va en la web.

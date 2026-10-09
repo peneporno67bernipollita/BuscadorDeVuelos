@@ -244,7 +244,7 @@ $$;
 -- Si cambia el viaje en sí (ruta, fechas, pasajeros, maletas, filtros), el historial
 -- anterior deja de compararse y los avisos empiezan de cero.
 create or replace function public.reprogramar_busqueda()
-returns trigger language plpgsql as $$
+returns trigger language plpgsql set search_path = public as $$
 begin
   if auth.uid() is not null then
     new.proxima_revision := now();
@@ -429,6 +429,77 @@ begin
 end;
 $$;
 
+-- =====================================================================
+-- Actualización v7: seguridad reforzada
+-- =====================================================================
+-- 1) Sin sesión no se puede ni mirar la estructura de las tablas (la web siempre entra con sesión;
+--    el robot usa la clave secreta). Las reglas RLS ya impedían leer datos: esto cierra hasta el esquema.
+revoke all on all tables in schema public from anon;
+revoke all on all sequences in schema public from anon;
+alter default privileges in schema public revoke all on tables from anon;
+alter default privileges in schema public revoke all on sequences from anon;
+
+-- 2) Datos válidos aunque alguien use la API directamente, sin pasar por la web
+--    Antes se ajusta lo que ya hubiera fuera de las reglas (normalmente nada), para que el robot
+--    pueda seguir actualizando esas filas.
+update public.perfiles set nombre = left(nombre, 60) where char_length(nombre) > 60;
+update public.perfiles set telegram_codigo = null where telegram_codigo !~ '^[A-Z0-9]{8,12}$';
+update public.aerolineas set web_oficial = regexp_replace(web_oficial, '^http://', 'https://') where web_oficial ~ '^http://';
+update public.aerolineas set web_oficial = null
+  where web_oficial <> '' and not (web_oficial ~ '^https://[^[:space:]"''<>]+$' and char_length(web_oficial) <= 300);
+update public.aerolineas set nombre = left(nombre, 80), criterio = left(criterio, 300), notas = left(notas, 1000)
+  where char_length(nombre) > 80 or char_length(criterio) > 300 or char_length(notas) > 1000;
+update public.busquedas set nombre = left(nombre, 80) where char_length(nombre) > 80;
+update public.busquedas set nombre = 'Búsqueda' where char_length(nombre) = 0;
+update public.estado_fuentes set intervalo_min = least(greatest(intervalo_min, 1), 10080),
+  pausa_min_s = least(greatest(pausa_min_s, 1), 3600), max_peticiones = least(greatest(max_peticiones, 1), 500)
+  where not (intervalo_min between 1 and 10080 and pausa_min_s between 1 and 3600 and max_peticiones between 1 and 500);
+update public.estado_fuentes set pausa_max_s = least(greatest(pausa_max_s, pausa_min_s), 3600)
+  where not (pausa_max_s between pausa_min_s and 3600);
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'aerolineas_web_https') then
+    alter table public.aerolineas add constraint aerolineas_web_https check (
+      web_oficial is null or web_oficial = '' or (web_oficial ~ '^https://[^[:space:]"''<>]+$' and char_length(web_oficial) <= 300)) not valid;
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'aerolineas_textos_largo') then
+    alter table public.aerolineas add constraint aerolineas_textos_largo check (
+      char_length(nombre) between 1 and 80 and coalesce(char_length(criterio), 0) <= 300
+      and coalesce(char_length(notas), 0) <= 1000) not valid;
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'busquedas_nombre_largo') then
+    alter table public.busquedas add constraint busquedas_nombre_largo check (char_length(nombre) between 1 and 80) not valid;
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'perfiles_campos_validos') then
+    alter table public.perfiles add constraint perfiles_campos_validos check (
+      coalesce(char_length(nombre), 0) <= 60
+      and (telegram_codigo is null or telegram_codigo ~ '^[A-Z0-9]{8,12}$')
+      and (telegram_chat_id is null or telegram_chat_id ~ '^-?[0-9]{1,20}$')) not valid;
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'estado_fuentes_limites') then
+    alter table public.estado_fuentes add constraint estado_fuentes_limites check (
+      intervalo_min between 1 and 10080 and pausa_min_s between 1 and 3600
+      and pausa_max_s between pausa_min_s and 3600 and max_peticiones between 1 and 500) not valid;
+  end if;
+end;
+$$;
+
+-- 3) El chat de Telegram solo lo vincula el robot al recibir tu código: desde la web (o con tu sesión
+--    robada) se puede desvincular, pero no desviar tus avisos a otro chat.
+create or replace function public.proteger_perfil()
+returns trigger language plpgsql set search_path = public as $$
+begin
+  if auth.uid() is not null and new.telegram_chat_id is not null
+     and new.telegram_chat_id is distinct from old.telegram_chat_id then
+    raise exception 'El chat de Telegram solo se vincula enviando el código al bot.';
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists proteger_perfil on public.perfiles;
+create trigger proteger_perfil before update on public.perfiles
+  for each row execute function public.proteger_perfil();
+
 -- Que la API de Supabase vea al momento las columnas nuevas
 notify pgrst, 'reload schema';
 
@@ -515,7 +586,7 @@ insert into public.aerolineas (codigo, nombre, permitida, criterio, web_oficial,
   ('H2', 'SKY Airline', true, 'AirlineRatings 2026: top 25 low cost (nº25)', 'https://www.skyairline.com', 50, 80, 80, 80, 'tramo', null, 'La tarifa básica solo incluye un bolso pequeño; maletas = máximo publicado (estimación).')
 on conflict (codigo) do nothing;
 
--- Comprobación final (debe salir: 8 tablas, 77 aerolíneas, 3 webs, versión 2 = 1, versión 3 = 2, versión 5 = 3, versión 6 = 5)
+-- Comprobación final (debe salir: 8 tablas, 77 aerolíneas, 3 webs, versión 2 = 1, versión 3 = 2, versión 5 = 3, versión 6 = 5, versión 7 = 6)
 select 'Tablas creadas' as comprobacion, count(*) as total from information_schema.tables
   where table_schema = 'public' and table_name in
   ('perfiles','busquedas','precios','avisos','aerolineas','estado_fuentes','ejecuciones','ajustes')
@@ -530,4 +601,7 @@ union all select 'Versión 5 instalada (alarma en el móvil)', count(*) from inf
   and column_name in ('ntfy_tema', 'alarma_chollos', 'alarma_prueba')
 union all select 'Versión 6 instalada (horario solo Telegram)', count(*) from information_schema.columns
   where table_schema = 'public' and table_name = 'perfiles'
-  and column_name in ('ntfy_pausa', 'ntfy_pausa_desde', 'ntfy_pausa_hasta', 'ntfy_pausa_dias', 'zona_horaria');
+  and column_name in ('ntfy_pausa', 'ntfy_pausa_desde', 'ntfy_pausa_hasta', 'ntfy_pausa_dias', 'zona_horaria')
+union all select 'Versión 7 instalada (seguridad reforzada)', (select count(*) from pg_constraint where conname in
+  ('aerolineas_web_https', 'aerolineas_textos_largo', 'busquedas_nombre_largo', 'perfiles_campos_validos',
+   'estado_fuentes_limites')) + (select count(*) from pg_trigger where tgname = 'proteger_perfil');

@@ -293,6 +293,9 @@ export function generarCodigo() {
 }
 
 /** Variación entre dos precios para mostrar ▼/▲. */
+/** Solo se enlaza a direcciones https:// (nunca javascript: ni similares). */
+export const esHttps = (url) => /^https:\/\/[^\s"'<>]+$/.test(String(url || ""));
+
 /** Días entre dos fechas "AAAA-MM-DD…" (horas locales de cada aeropuerto, sin zonas). */
 const diasEntre = (a, b) => Math.round((Date.parse(String(b).slice(0, 10)) - Date.parse(String(a).slice(0, 10))) / 86400000);
 
