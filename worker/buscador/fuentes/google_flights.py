@@ -39,7 +39,7 @@ from fli.search.client import get_client
 
 from .. import filtros
 from ..tiempo import hoy
-from ..modelos import FuenteBloqueada, Opcion, PrecioCalendario, ResultadoFuente, Tramo, Trayecto
+from ..modelos import ErrorExplicado, FuenteBloqueada, Opcion, PrecioCalendario, ResultadoFuente, Tramo, Trayecto
 
 log = logging.getLogger(__name__)
 
@@ -82,6 +82,21 @@ def _es_bloqueo(error: Exception) -> bool:
     )
 
 
+# Google a veces responde con una página sin vuelos (la librería ya lo reintenta 3 veces). Si pasa en dos
+# consultas seguidas no es casualidad: el robot lo trata como un bloqueo y espera antes de volver.
+SIN_DATOS_SEGUIDOS_BLOQUEO = 2
+
+
+class SinResultados(ErrorExplicado):
+    """Google no ha devuelto su página de resultados (ni vuelos ni error claro)."""
+
+
+def explicar_sin_datos(respuestas: list[str]) -> str:
+    if any(r.startswith("página de consentimiento") for r in respuestas):
+        return "Google ha enseñado su aviso de cookies en vez de los vuelos (se reintenta en unos minutos)"
+    return "Google ha devuelto una página sin vuelos; suele ser un fallo puntual suyo (se reintenta en unos minutos)"
+
+
 def describir_respuesta(estado: int, cuerpo: str) -> str:
     """Clasifica una respuesta de Google sin copiar su contenido (puede llevar datos de la búsqueda)."""
     inicio = cuerpo[:5000].lower()
@@ -110,6 +125,7 @@ class GoogleFlights:
         self.incluir = [a for c in sorted(codigos_permitidos) if (a := self._aerolinea(c))]
         self._primera = True
         self.respuestas: list[str] = []  # clasificación de cada respuesta de Google (diagnóstico)
+        self._sin_datos_seguidos = 0
         self._vigilar_respuestas()
 
     def _vigilar_respuestas(self) -> None:
@@ -144,12 +160,22 @@ class GoogleFlights:
 
     def _llamar(self, funcion, *args, **kwargs):
         self._pausa()
+        antes = len(self.respuestas)
         try:
-            return funcion(*args, **kwargs, **LOCALE)
+            resultado = funcion(*args, **kwargs, **LOCALE)
         except Exception as e:  # la librería lanza excepciones genéricas
-            if _es_bloqueo(e):
+            vistas = self.respuestas[antes:]
+            if _es_bloqueo(e) or any(r.startswith("bloqueo") for r in vistas):
                 raise FuenteBloqueada(f"Google Flights ha limitado las peticiones: {e}") from e
+            if type(e).__name__ == "SearchParseError":  # ninguna página con datos, tras los reintentos
+                self._sin_datos_seguidos += 1
+                if self._sin_datos_seguidos >= SIN_DATOS_SEGUIDOS_BLOQUEO:
+                    raise FuenteBloqueada("Google devuelve páginas sin vuelos una y otra vez: "
+                                          "el robot hace una pausa antes de volver a intentarlo") from e
+                raise SinResultados(explicar_sin_datos(vistas)) from e
             raise
+        self._sin_datos_seguidos = 0
+        return resultado
 
     # ------------------------------------------------------------------
     # Construcción de filtros

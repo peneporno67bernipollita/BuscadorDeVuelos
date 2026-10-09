@@ -333,3 +333,42 @@ def test_enlace_google_abre_en_los_mas_bajos():
     from buscador.enlaces import google_flights
     url = google_flights(busqueda(), opcion_directa())
     assert url.startswith("https://www.google.com/travel/flights/search?tfs=") and "tfu=EgoIABAAGAAgAigB" in url
+
+
+def test_google_sin_pagina_de_resultados():
+    import pytest
+    from fli.search import SearchParseError
+
+    from buscador.fuentes.google_flights import GoogleFlights, SinResultados
+    from buscador.modelos import FuenteBloqueada
+
+    g = GoogleFlights.__new__(GoogleFlights)  # sin red ni cliente real
+    g.pausa, g._primera, g.respuestas, g._sin_datos_seguidos = (0, 0), True, [], 0
+
+    def sin_datos(**_):
+        g.respuestas.append("página sin datos de vuelos (HTTP 200, 900 bytes)")
+        raise SearchParseError("Search page carried no ds:1 payload")
+
+    # Una vez: mensaje claro en español (sin el nombre técnico del error)
+    with pytest.raises(SinResultados, match="página sin vuelos"):
+        g._llamar(sin_datos)
+    # Dos seguidas: se respeta como un bloqueo y el robot espera
+    with pytest.raises(FuenteBloqueada):
+        g._llamar(sin_datos)
+    # Una respuesta buena pone la cuenta a cero
+    assert g._llamar(lambda **_: [1]) == [1] and g._sin_datos_seguidos == 0
+
+    def trafico_inusual(**_):
+        g.respuestas.append("bloqueo (HTTP 200)")
+        raise SearchParseError("Search page carried no ds:1 payload")
+
+    with pytest.raises(FuenteBloqueada):  # la página de "tráfico inusual" es un bloqueo a la primera
+        g._llamar(trafico_inusual)
+
+    def cookies(**_):
+        g.respuestas.append("página de consentimiento de cookies (HTTP 200)")
+        raise SearchParseError("x")
+
+    g._sin_datos_seguidos = 0
+    with pytest.raises(SinResultados, match="cookies"):
+        g._llamar(cookies)

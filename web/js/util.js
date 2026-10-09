@@ -293,6 +293,15 @@ export function generarCodigo() {
 }
 
 /** Variación entre dos precios para mostrar ▼/▲. */
+/** Mensajes técnicos de versiones anteriores del robot, explicados (los nuevos ya vienen en español). */
+export function estadoLegible(texto) {
+  const t = String(texto ?? "");
+  if (/SearchParseError|ds:1 payload/i.test(t)) {
+    return "No se pudo consultar en esta ronda: Google ha devuelto una página sin vuelos; suele ser un fallo puntual suyo (se reintenta en unos minutos)";
+  }
+  return t.replace(/:\s*[A-Z]\w*(Error|Exception):\s[\s\S]*$/, ": fallo puntual al consultar la web (se reintenta en unos minutos)");
+}
+
 /** Solo se enlaza a direcciones https:// (nunca javascript: ni similares). */
 export const esHttps = (url) => /^https:\/\/[^\s"'<>]+$/.test(String(url || ""));
 

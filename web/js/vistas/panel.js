@@ -3,7 +3,7 @@ import { miniGrafica } from "../graficas.js";
 import { icono } from "../iconos.js";
 import {
   $, aeropuertos, aeropuertosDe, aviso, cadaSegundos, alSalir, tablero, contarHasta, cuentaAtras, deltaHtml, destello, esc, eur, fechaHora,
-  fechasPrecioHtml, fechasTexto, hace, limpiarPantalla, pasajerosTexto,
+  estadoLegible, fechasPrecioHtml, fechasTexto, hace, limpiarPantalla, pasajerosTexto,
 } from "../util.js";
 
 const TIPO_AVISO = {
@@ -73,7 +73,7 @@ function tarjetaBusqueda(b, datos, mejor) {
       </div>
       <div class="mini-grafica"><canvas data-grafica="${b.id}" aria-label="Evolución del precio"></canvas></div>
       <div class="busqueda-pie">
-        <span class="pequeno suave" data-estado>${esc(b.estado || "Pendiente de la primera revisión")}</span>
+        <span class="pequeno suave" data-estado>${esc(estadoLegible(b.estado) || "Pendiente de la primera revisión")}</span>
         <span class="pequeno tenue" data-revisado>${b.activa ? `próxima ${hace(b.proxima_revision)}` : "en pausa"}</span>
       </div>
       <div class="acciones">
@@ -184,7 +184,7 @@ export async function vistaPanel(app) {
     const local = busquedas.find((x) => x.id === b.id);
     if (local) Object.assign(local, b);
     tarjeta.querySelector("[data-fechas]").innerHTML = fechasDe(b, mejores.get(b.id));
-    tarjeta.querySelector("[data-estado]").textContent = b.estado || "";
+    tarjeta.querySelector("[data-estado]").textContent = estadoLegible(b.estado);
     tarjeta.querySelector("[data-revisado]").textContent = b.activa ? `próxima ${hace(b.proxima_revision)}` : "en pausa";
   }));
   alSalir(api.suscribir("precios", ({ new: p }) => {

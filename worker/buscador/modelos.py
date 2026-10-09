@@ -148,5 +148,9 @@ class ResultadoFuente:
     error: str | None = None
 
 
+class ErrorExplicado(Exception):
+    """Fallo con el mensaje ya escrito para ti: la web lo muestra tal cual, sin nombres técnicos."""
+
+
 class FuenteBloqueada(Exception):
     """La web ha bloqueado al robot (CAPTCHA, 403, 429...). No se intenta saltar el bloqueo."""

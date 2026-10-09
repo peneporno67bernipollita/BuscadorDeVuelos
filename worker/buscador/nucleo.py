@@ -13,7 +13,7 @@ from .filtros import Validador
 from .fuentes.google_flights import GoogleFlights
 from .fuentes.ryanair import Ryanair
 from .fuentes.skyscanner import Skyscanner
-from .modelos import FuenteBloqueada, Opcion, ResultadoFuente
+from .modelos import ErrorExplicado, FuenteBloqueada, Opcion, ResultadoFuente
 
 log = logging.getLogger(__name__)
 
@@ -63,7 +63,7 @@ def consultar(
                 break
             except Exception as e:  # un fallo en una búsqueda no detiene las demás
                 log.error("Error en %s con la búsqueda %s…: %s", nombre, b["id"][:8], type(e).__name__)
-                r = ResultadoFuente(error=f"{type(e).__name__}: {e}"[:300])
+                r = ResultadoFuente(error=(str(e) if isinstance(e, ErrorExplicado) else f"{type(e).__name__}: {e}")[:300])
                 est["errores"].append(r.error)
             if r.error and r.error not in est["errores"]:
                 est["errores"].append(r.error)

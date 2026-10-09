@@ -3,7 +3,7 @@ import { graficaPrecios } from "../graficas.js";
 import { icono } from "../iconos.js";
 import {
   $, aeropuertos, aeropuertosDe, alSalir, animarTableros, tablero, aviso, cadaSegundos, confirmar, contarHasta, cuentaAtras, deltaHtml, destello, esc, eur,
-  esHttps, fecha, fechaHora, fechasPrecioHtml, fechasTexto, hace, horaLocal, limpiarPantalla, maletasTexto, pasajerosTexto,
+  esHttps, estadoLegible, fecha, fechaHora, fechasPrecioHtml, fechasTexto, hace, horaLocal, limpiarPantalla, maletasTexto, pasajerosTexto,
 } from "../util.js";
 
 const NOMBRE_FUENTE = { google_flights: "Google Flights", ryanair: "Ryanair", skyscanner: "Skyscanner" };
@@ -269,7 +269,7 @@ export async function vistaDetalle(app, id) {
         <div id="zona-grafica">${historial.length ? '<div class="grafica"><canvas id="grafica" aria-label="Evolución del precio total"></canvas></div>' : placeholderGrafica}</div>
         <div class="estadisticas" id="estadisticas" style="margin-top:1.1rem"></div>
         <div class="nota alerta ${Object.keys(info.rechazos || {}).length ? "" : "oculto"}" id="rechazos">${notaRechazos(info.rechazos)}</div>
-        <div class="nota ${b.estado ? "" : "oculto"}" style="margin-top:.8rem">${icono("info")}<span id="estado">${esc(b.estado || "")}</span></div>
+        <div class="nota ${b.estado ? "" : "oculto"}" style="margin-top:.8rem">${icono("info")}<span id="estado">${esc(estadoLegible(b.estado))}</span></div>
       </section>
 
       <div class="rejilla-2" style="margin-top:1.1rem">
@@ -414,7 +414,7 @@ export async function vistaDetalle(app, id) {
     tiempoRealActivo = true;
     b = { ...b, ...nueva };
     $("#revisado").textContent = textoRevisado();
-    $("#estado").textContent = nueva.estado || "";
+    $("#estado").textContent = estadoLegible(nueva.estado);
     $("#estado").closest(".nota").classList.toggle("oculto", !nueva.estado);
     const rechazos = $("#rechazos");
     rechazos.innerHTML = notaRechazos(nueva.info?.rechazos);
