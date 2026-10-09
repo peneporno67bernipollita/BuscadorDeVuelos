@@ -35,6 +35,7 @@ from .filtros import Validador, franja
 from .modelos import Opcion
 from .nucleo import consultar, crear_fuentes, evaluar
 from .tiempo import hoy as hoy_espana
+from .viaje import es_varios_destinos, salidas
 
 log = logging.getLogger("buscador")
 
@@ -99,12 +100,14 @@ def _fecha_hora(valor: str | None) -> datetime | None:
 
 def _caducada(b: dict, hoy: date) -> bool:
     if b["modo"] == "fechas":
-        return date.fromisoformat(str(b["fecha_ida"])) < hoy
+        return all(f < hoy for f in salidas(b))  # con varias fechas, cuando ya han pasado todas
     return date.fromisoformat(str(b["chollo_hasta"])) < hoy
 
 
 def _aplica(fuente: str, b: dict, hoy: date) -> bool:
     info = b.get("info") or {}
+    if fuente in ("ryanair", "skyscanner") and es_varios_destinos(b):
+        return False  # los viajes con varios destinos solo los busca Google Flights
     if fuente == "skyscanner":
         return b["modo"] == "fechas"
     if fuente == "ryanair":
@@ -391,7 +394,8 @@ def _fila_precio(b: dict, op: Opcion, es_mejor: bool, aerolineas: dict) -> dict:
         "usuario": b["usuario"],
         "fuente": op.fuente,
         "fecha_ida": op.ida.fecha.isoformat(),
-        "fecha_vuelta": op.vuelta.fecha.isoformat() if op.vuelta else None,
+        "fecha_vuelta": (op.vuelta or (op.siguientes[-1] if op.siguientes else None)).fecha.isoformat()
+        if op.vuelta or op.siguientes else None,
         "precio_billetes": round(op.precio_billetes, 2),
         "precio_maletas": op.precio_maletas,
         "descuento": op.descuento,

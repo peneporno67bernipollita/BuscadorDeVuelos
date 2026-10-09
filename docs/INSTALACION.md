@@ -26,9 +26,10 @@ Todo es gratis. Tardarás unos 30 minutos. Necesitas:
    (la versión 2 añade el tiempo real de la web, la señal de vida del robot y el mensaje de prueba de Telegram;
    la versión 3, varios aeropuertos de salida y de llegada por búsqueda; la versión 5, la alarma en el móvil;
    la versión 6, el horario «solo Telegram» de la alarma; la versión 7, seguridad reforzada; la versión 8, un aviso
-   por Telegram cada vez que alguien entra en tu cuenta).
+   por Telegram cada vez que alguien entra en tu cuenta; la versión 9, varias fechas en una búsqueda y viajes con
+   varios destinos).
    La tabla final debe decir "Versión 2 instalada" = 1, "Versión 3 instalada" = 2, "Versión 5 instalada" = 3,
-   "Versión 6 instalada" = 5, "Versión 7 instalada" = 6 y "Versión 8 instalada" = 1.
+   "Versión 6 instalada" = 5, "Versión 7 instalada" = 6, "Versión 8 instalada" = 1 y "Versión 9 instalada" = 2.
    "Accesos registrados por Supabase" debe ser más de 0 si has usado la web este mes; si sale 0, revisa en
    **Authentication → Audit Logs** que esté activado **Write audit logs to the database** (sin eso no hay avisos de acceso).
 5. Apunta estos tres datos:

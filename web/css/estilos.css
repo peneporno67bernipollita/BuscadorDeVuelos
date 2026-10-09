@@ -896,3 +896,116 @@ tbody tr.bloqueada td:not(:first-child) { opacity: .5; }
 .ruta { align-items: start; }
 .ruta .trazo { font-size: 1.45rem; margin-top: calc(.65em - 12px); }
 .ruta.grande .trazo { font-size: clamp(1.8rem, 1.3rem + 1.8vw, 2.6rem); }
+
+
+/* =====================================================================
+   Formulario: lo desplegado (aeropuertos, calendario) por encima de la tarjeta siguiente.
+   Cada tarjeta conserva su animación de entrada y eso la convierte en una capa propia:
+   la que tiene algo abierto (o el foco) sube por encima de las demás.
+   ===================================================================== */
+.tarjeta:focus-within, .tarjeta:has(.sugerencias:not(.oculto)), .tarjeta:has(.selector-fechas.abierto) { z-index: 5; }
+
+/* ---------- Selector de fechas: tarjeta de embarque + calendario ---------- */
+.selector-fechas { position: relative; }
+.billete {
+  display: flex; align-items: stretch; min-height: 66px; border: 1px solid var(--borde-fuerte); border-radius: 8px;
+  background: var(--superficie-2); transition: border-color .2s, box-shadow .2s;
+}
+.billete:hover { border-color: color-mix(in srgb, var(--primario) 40%, var(--borde-fuerte)); }
+.selector-fechas.abierto .billete { border-color: var(--primario); box-shadow: 0 0 0 4px var(--primario-suave); }
+.billete-parte, .billete-parte:hover, .billete-parte:active {
+  flex: 1 1 0; min-width: 0; display: grid; align-content: center; justify-items: start; gap: .16rem; padding: .5rem .85rem;
+  border: 0; border-radius: 7px; background: transparent; box-shadow: none; transform: none; text-align: left;
+  color: var(--texto); font-weight: 400; white-space: nowrap; overflow: visible;
+}
+.billete-parte:hover { background: var(--primario-suave); }
+.billete-parte:focus-visible { outline: 2px solid var(--primario); outline-offset: -2px; }
+.billete-parte[aria-expanded="true"] { background: var(--primario-suave); box-shadow: inset 0 -2px 0 var(--primario); }
+.billete-parte.fin { justify-items: end; text-align: right; }
+.billete-etq { font: 700 .62rem/1 var(--fuente-texto); letter-spacing: .09em; text-transform: uppercase; color: var(--tenue); }
+.billete-fecha { font: 700 1.3rem/1.05 var(--fuente-display); color: var(--texto); }
+.billete-fecha.vacia { color: var(--tenue); font-weight: 600; }
+.billete-anyo { font: 500 .7rem/1 var(--fuente-datos); color: var(--tenue); }
+.billete-medio {
+  flex: 0 0 auto; display: grid; place-items: center; align-content: center; gap: .25rem; padding: 0 .75rem;
+  color: var(--primario); border-inline: 1.5px dashed var(--borde-fuerte);
+}
+.billete-medio svg { width: 18px; height: 18px; }
+.billete-duracion { font: 600 .7rem/1 var(--fuente-texto); color: var(--suave); white-space: nowrap; min-height: .7rem; }
+.billete-icono { display: grid; place-items: center; padding: 0 .9rem; color: var(--tenue); border-left: 1.5px dashed var(--borde-fuerte); }
+.billete-icono svg { width: 18px; height: 18px; }
+
+.calendario {
+  position: absolute; z-index: 30; top: calc(100% + 8px); left: 0; width: max-content; max-width: calc(100vw - 1.5rem);
+  padding: .8rem .9rem .75rem; background: var(--superficie-solida); border: 1px solid var(--borde-fuerte); border-radius: 10px;
+  box-shadow: var(--sombra-grande); opacity: 0; transform: translateY(-4px) scale(.985); transform-origin: 2rem 0;
+  transition: opacity .12s ease-in, transform .12s ease-in;
+}
+.calendario.visible { opacity: 1; transform: none; transition: opacity .18s var(--curva), transform .18s var(--curva); }
+.cal-navegacion { position: absolute; z-index: 1; top: .7rem; left: .55rem; right: .55rem; display: flex; justify-content: space-between; pointer-events: none; }
+.cal-navegacion button { pointer-events: auto; }
+.cal-navegacion button:disabled { opacity: .3; }
+.cal-meses { display: grid; grid-template-columns: repeat(var(--meses, 1), auto); gap: 1.5rem; }
+.cal-meses.desliza-adelante { animation: cal-adelante .2s var(--curva); }
+.cal-meses.desliza-atras { animation: cal-atras .2s var(--curva); }
+@keyframes cal-adelante { from { opacity: .35; transform: translateX(10px); } }
+@keyframes cal-atras { from { opacity: .35; transform: translateX(-10px); } }
+.cal-titulo { text-align: center; font: 700 1.08rem/2.1rem var(--fuente-display); letter-spacing: .03em; text-transform: capitalize; margin-bottom: .2rem; }
+.cal-tabla { width: auto; border-collapse: separate; border-spacing: 0 3px; }
+.cal-tabla th, .cal-tabla td { border: 0; }
+.cal-tabla th { width: var(--celda, 2.55rem); padding: .2rem 0 .35rem; text-align: center; font: 700 .66rem/1 var(--fuente-texto); letter-spacing: .06em; color: var(--tenue); }
+.cal-tabla td { padding: 0; }
+.cal-tabla tbody tr, .cal-tabla tbody tr:hover { background: none; }
+.cal-dia, .cal-dia:hover, .cal-dia:active {
+  position: relative; display: grid; place-items: center; width: var(--celda, 2.55rem); height: 2.4rem; padding: 0;
+  border: 0; border-radius: 6px; background: transparent; box-shadow: none; transform: none; overflow: visible;
+  font: 600 .93rem/1 var(--fuente-texto); font-variant-numeric: tabular-nums; color: var(--texto);
+  transition: background-color .12s, color .12s;
+}
+.cal-dia:not(:disabled):hover { box-shadow: inset 0 0 0 1.5px var(--primario); }
+.cal-dia:focus-visible { z-index: 1; outline: 2px solid var(--primario); outline-offset: 1px; }
+.cal-dia:disabled { color: var(--tenue); opacity: .38; cursor: not-allowed; }
+.cal-dia.hoy::after { content: ""; position: absolute; bottom: 5px; left: 50%; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: var(--primario); }
+.cal-dia.en-ruta { border-radius: 0; background: color-mix(in srgb, var(--primario) 15%, transparent); }
+td:first-child > .cal-dia.en-ruta { border-radius: 6px 0 0 6px; }
+td:last-child > .cal-dia.en-ruta { border-radius: 0 6px 6px 0; }
+.cal-dia.fin-previa { box-shadow: inset 0 0 0 1.5px var(--primario); background: color-mix(in srgb, var(--primario) 15%, transparent); }
+.cal-dia.inicio, .cal-dia.fin, .cal-dia.inicio:hover, .cal-dia.fin:hover { background: var(--primario); color: var(--sobre-primario); font-weight: 750; box-shadow: none; }
+.cal-dia.inicio.hoy::after, .cal-dia.fin.hoy::after { background: var(--sobre-primario); }
+.cal-pie { display: flex; align-items: center; justify-content: space-between; gap: .8rem; margin-top: .5rem; padding-top: .6rem; border-top: 1px solid var(--borde); }
+.cal-estado { font-size: .8rem; font-weight: 600; color: var(--suave); }
+@media (max-width: 420px) { .calendario { --celda: calc((100vw - 4.6rem) / 7); } }
+
+/* ---------- Fechas: las principales, el margen y las alternativas ---------- */
+.fechas-principal { display: flex; flex-wrap: wrap; gap: .8rem 1rem; align-items: flex-start; }
+.fechas-principal > :first-child { flex: 1 1 290px; min-width: 0; }
+.fechas-principal > :last-child { flex: 1 1 170px; max-width: 260px; }
+.fechas-principal .campo, .fila-fechas .campo { margin-bottom: 0; }
+.fechas-extra { display: grid; gap: .6rem; margin-top: .8rem; }
+.fechas-extra:empty { display: none; }
+.fila-fechas { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: .6rem; align-items: center; animation: entrar .3s var(--curva) both; }
+.fila-fechas .num-fechas { min-width: 1.6rem; font: 700 .74rem/1 var(--fuente-datos); color: var(--tenue); text-align: center; }
+
+/* ---------- Viaje con varios destinos: un vuelo por fila ---------- */
+.vuelos-viaje { display: grid; gap: .7rem; margin: 0; padding: 0; list-style: none; }
+.vuelo-viaje { padding: .75rem .9rem .9rem; border: 1px solid var(--borde); border-radius: 10px; background: var(--superficie-2); animation: entrar .3s var(--curva) both; }
+.vuelo-viaje-cabecera { display: flex; align-items: center; justify-content: space-between; gap: .6rem; margin-bottom: .45rem; }
+.numero-vuelo { display: inline-flex; align-items: center; gap: .4rem; font: 700 .95rem/1 var(--fuente-display); letter-spacing: .04em; text-transform: uppercase; }
+.numero-vuelo svg { width: 16px; height: 16px; color: var(--primario); }
+.vuelo-viaje-campos { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, .95fr); gap: .6rem; align-items: start; }
+.vuelo-viaje-campos .campo { margin-bottom: 0; }
+@media (max-width: 760px) { .vuelo-viaje-campos { grid-template-columns: 1fr 1fr; } .vuelo-viaje-campos .campo-fecha-vuelo { grid-column: 1 / -1; } }
+@media (max-width: 480px) { .vuelo-viaje-campos { grid-template-columns: 1fr; } }
+
+/* ---------- Recorrido de un viaje con varios destinos (panel y detalle) ---------- */
+.recorrido { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .5rem; }
+.recorrido .tablero { font-size: 1.12rem; }
+.recorrido .paso-ruta { display: grid; place-items: center; color: var(--primario); }
+.recorrido .paso-ruta svg { width: 15px; height: 15px; }
+.recorrido-ciudades { margin-top: .35rem; font-size: .78rem; color: var(--suave); }
+.recorrido.grande .tablero { font-size: clamp(1.15rem, .85rem + 1.4vw, 2.1rem); }
+.recorrido.grande + .recorrido-ciudades { font-size: .9rem; }
+.fp.varios { display: flex; flex-wrap: wrap; gap: .25rem 1rem; }
+.fp.varios .fp-noches { flex-basis: 100%; }
+.segmentado label:has(input:disabled) { opacity: .45; cursor: not-allowed; }
+.segmentado label:has(input:focus-visible) { outline: 2px solid var(--primario); outline-offset: 1px; }

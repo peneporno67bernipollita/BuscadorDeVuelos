@@ -3,7 +3,7 @@ import { graficaPrecios } from "../graficas.js";
 import { icono } from "../iconos.js";
 import {
   $, aeropuertos, aeropuertosDe, alSalir, animarTableros, tablero, aviso, cadaSegundos, confirmar, contarHasta, cuentaAtras, deltaHtml, destello, esc, eur,
-  esHttps, estadoLegible, fecha, fechaHora, fechasPrecioHtml, fechasTexto, hace, horaLocal, limpiarPantalla, maletasTexto, pasajerosTexto,
+  esHttps, estadoLegible, fecha, recorridoHtml, tramosViaje, fechaHora, fechasPrecioHtml, fechasTexto, hace, horaLocal, limpiarPantalla, maletasTexto, pasajerosTexto,
 } from "../util.js";
 
 const NOMBRE_FUENTE = { google_flights: "Google Flights", ryanair: "Ryanair", skyscanner: "Skyscanner" };
@@ -74,11 +74,13 @@ function tarjetaVuelo(p, aerolineas, esMejor) {
         <div class="fila" style="gap:.35rem">
           ${esMejor ? `<span class="chip ok">${icono("check")}La mejor</span>` : ""}
           <span class="chip">${esc(NOMBRE_FUENTE[p.fuente] || p.fuente)}</span>
-          ${d.billetes_separados ? `<span class="chip alerta">${icono("aviso")}2 billetes</span>` : ""}
+          ${d.billetes_separados ? `<span class="chip alerta">${icono("aviso")}${(d.siguientes || []).length ? (d.siguientes.length + 1) : 2} billetes</span>` : ""}
           ${vueltaAOtro(d) ? `<span class="chip alerta">${icono("intercambiar")}Vuelves a ${esc(vueltaAOtro(d).llegas)}</span>` : ""}
         </div>
       </div>
-      ${lineaTrayecto("Ida", d.ida, aerolineas)}
+      ${(d.siguientes || []).length
+        ? [d.ida, ...d.siguientes].map((tr, i) => lineaTrayecto(`Vuelo ${i + 1}`, tr, aerolineas)).join("")
+        : lineaTrayecto("Ida", d.ida, aerolineas)}
       ${d.vuelta ? lineaTrayecto("Vuelta", d.vuelta, aerolineas) : ""}
       <div class="vuelo-pie">
         <div class="desglose">
@@ -87,7 +89,7 @@ function tarjetaVuelo(p, aerolineas, esMejor) {
           ${(d.notas || []).map((n) => `<span class="tenue">${esc(n)}</span>`).join("")}
         </div>
         <div class="acciones">${botonesComprar(p)}${enlaces}
-          ${d.google_flights && d.comprar?.length ? `<a class="boton pequeno fantasma" href="${esc(d.google_flights)}" target="_blank" rel="noopener">${icono("lupa")}Ver los más baratos</a>` : ""}</div>
+          ${d.google_flights && d.comprar?.length && !(d.siguientes || []).length ? `<a class="boton pequeno fantasma" href="${esc(d.google_flights)}" target="_blank" rel="noopener">${icono("lupa")}Ver los más baratos</a>` : ""}</div>
       </div>
     </div>`;
 }
@@ -226,11 +228,12 @@ export async function vistaDetalle(app, id) {
             <button id="borrar" class="peligro icono" title="Borrar">${icono("papelera")}</button>
           </div>
         </div>
+        ${tramosViaje(b) ? `<div class="ruta" style="display:block;margin:1.4rem 0 1.2rem">${recorridoHtml(datos, b, true)}</div>` : `
         <div class="ruta grande" style="margin:1.4rem 0 1.2rem">
           <div class="aeropuerto"><div class="codigo">${tablero(b.origen)}</div><div class="ciudad">${ciudad(b.origen)}</div>${alternativos(origenes)}</div>
           <div class="trazo">${icono("avion")}</div>
           <div class="aeropuerto fin"><div class="codigo">${tablero(b.destino)}</div><div class="ciudad">${ciudad(b.destino)}</div>${alternativos(destinos)}</div>
-        </div>
+        </div>`}
         <div class="fila" style="gap:.45rem">
           ${b.modo === "chollo" ? `<span class="chip">${icono("llama")}Chollo: cualquier fecha</span>` : ""}
           <span class="chip">${icono("calendario")}${esc(fechasTexto(b))}</span>

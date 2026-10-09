@@ -15,6 +15,7 @@ from .decision import Decision
 from .filtros import aeropuertos_busqueda
 from .modelos import Opcion, Trayecto
 from .tiempo import ZONA
+from .viaje import ruta_viaje
 
 log = logging.getLogger(__name__)
 
@@ -69,7 +70,10 @@ def _linea_trayecto(etiqueta: str, tr: Trayecto, aerolineas: dict[str, dict]) ->
 
 
 def ruta_txt(b: dict) -> str:
-    """"Jerez (XRY) o Sevilla (SVQ) → París Charles de Gaulle (CDG)"."""
+    """"Jerez (XRY) o Sevilla (SVQ) → París Charles de Gaulle (CDG)"; con varios destinos, todo el recorrido."""
+    recorrido = ruta_viaje(b) if b.get("modo") == "fechas" else []
+    if recorrido:
+        return " → ".join(map(aeropuertos.nombre, recorrido))
     origenes, destinos = aeropuertos_busqueda(b)
     return " o ".join(map(aeropuertos.nombre, origenes)) + " → " + " o ".join(map(aeropuertos.nombre, destinos))
 
@@ -103,10 +107,13 @@ def mensaje_aviso(
     lineas = [
         f"<b>{_e(decision.titulo)}</b>",
         f"<b>{_e(b['nombre'])}</b>",
-        _e(ruta) + (" · ida y vuelta" if op.vuelta else " · solo ida"),
+        _e(ruta) + (" · varios destinos" if op.siguientes else " · ida y vuelta" if op.vuelta else " · solo ida"),
         "",
-        _linea_trayecto("Ida", op.ida, aerolineas),
     ]
+    if op.siguientes:
+        lineas += [_linea_trayecto(f"Vuelo {i}", tr, aerolineas) for i, tr in enumerate([op.ida] + op.siguientes, 1)]
+    else:
+        lineas.append(_linea_trayecto("Ida", op.ida, aerolineas))
     if op.vuelta:
         lineas.append(_linea_trayecto("Vuelta", op.vuelta, aerolineas))
     lineas += ["", f"👥 {_e(pasajeros_txt(b))}", "", f"💶 <b>TOTAL: {eur(op.precio_total)}</b> (todos los pasajeros)"]
@@ -131,7 +138,9 @@ def mensaje_aviso(
             aviso += (f" Volviendo a {_e(aeropuertos.nombre(mismo_aeropuerto.ida.origen))} costaría "
                       f"{eur(mismo_aeropuerto.precio_total)} (+{eur(mismo_aeropuerto.precio_total - op.precio_total)}).")
         lineas.append(aviso)
-    if op.billetes_separados:
+    if op.siguientes:
+        lineas.append("⚠️ Cada vuelo es un billete aparte: tienes que comprarlos todos.")
+    elif op.billetes_separados:
         lineas.append("⚠️ Ida y vuelta son billetes separados: tienes que comprar los dos.")
     for nota in op.notas:
         lineas.append(f"ℹ️ {_e(nota)}")
@@ -142,7 +151,8 @@ def mensaje_aviso(
     lineas += ["", "🏢 <b>O en la web oficial:</b>"]
     for e in (x for x in enlaces_compra if es_https(x["url"])):
         lineas.append(f'• <a href="{_href(e["url"])}">{_e(e["aerolinea"])}</a>')
-    lineas.append(f'🔎 <a href="{_href(enlace_google)}">Ver los más baratos en Google Flights</a>')
+    if not op.siguientes:  # con varios destinos, Google solo enseña los vuelos de uno en uno
+        lineas.append(f'🔎 <a href="{_href(enlace_google)}">Ver los más baratos en Google Flights</a>')
     if url_web:
         lineas.append(f'📈 <a href="{_href(url_web)}">Historial en tu web</a>')
     lineas.append("Revisa el precio final en la web antes de pagar: puede cambiar en cualquier momento.")

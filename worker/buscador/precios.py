@@ -38,9 +38,15 @@ def coste_maletas(opcion: Opcion, busqueda: dict, aerolineas: dict[str, dict]) -
     campo = CAMPO_FACTURADA[zona]
     total = 0.0
     desglose: list[str] = []
-    for sentido, trayecto in (("Ida", opcion.ida), ("Vuelta", opcion.vuelta)):
+    if opcion.siguientes:
+        partes_viaje = [(f"Vuelo {i}", tr) for i, tr in enumerate([opcion.ida] + opcion.siguientes, 1)]
+    else:
+        partes_viaje = [("Ida", opcion.ida), ("Vuelta", opcion.vuelta)]
+    for sentido, trayecto in partes_viaje:
         if trayecto is None:
             continue
+        if opcion.siguientes:  # en un viaje con varios destinos, cada vuelo con su tipo de ruta
+            campo = CAMPO_FACTURADA[aeropuertos.tipo_ruta(trayecto.origen, trayecto.destino)]
         # Cuántas veces cobra cada aerolínea: por vuelo ('tramo') o una vez por trayecto
         cobros: dict[str, int] = {}
         for tramo in trayecto.tramos:

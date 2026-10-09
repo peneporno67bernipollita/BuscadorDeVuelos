@@ -3,7 +3,7 @@ import { miniGrafica } from "../graficas.js";
 import { icono } from "../iconos.js";
 import {
   $, aeropuertos, aeropuertosDe, aviso, cadaSegundos, alSalir, tablero, contarHasta, cuentaAtras, deltaHtml, destello, esc, eur, fechaHora,
-  estadoLegible, fechasPrecioHtml, fechasTexto, hace, limpiarPantalla, pasajerosTexto,
+  estadoLegible, fechasPrecioHtml, fechasTexto, hace, limpiarPantalla, pasajerosTexto, recorridoHtml, tramosViaje,
 } from "../util.js";
 
 const TIPO_AVISO = {
@@ -12,6 +12,7 @@ const TIPO_AVISO = {
 };
 
 function rutaHtml(datos, b) {
+  if (tramosViaje(b)) return recorridoHtml(datos, b);
   const a = (c) => datos.mapa.get(c);
   const ciudad = (c) => esc(a(c)?.es || a(c)?.m || c);
   const { origenes, destinos } = aeropuertosDe(b);

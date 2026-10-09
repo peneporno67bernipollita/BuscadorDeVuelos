@@ -36,12 +36,13 @@ function crearDatos() {
     ...serie("demo-1", ahora - 3 * DIA, 620, 3 * 72, 7),
     ...serie("demo-2", ahora - 3 * DIA, 92, 3 * 24, 3).map((p, i) => ({ ...p, revisado: iso(ahora - 3 * DIA + i * 60 * MIN) })),
     ...serie("demo-3", ahora - 2 * DIA, 214, 2 * 72, 11),
+    ...serie("demo-4", ahora - 2 * DIA, 260, 2 * 72, 5),
   ];
   const ultimo = (id) => historial.filter((h) => h.busqueda === id).at(-1).precio_total;
   const penultimo = (id) => historial.filter((h) => h.busqueda === id).at(-2).precio_total;
   const minimo = (id) => Math.min(...historial.filter((h) => h.busqueda === id).map((h) => h.precio_total));
   const comun = {
-    usuario: "demo", origenes_extra: [], destinos_extra: [], flex_dias: 0, chollo_desde: null, chollo_hasta: null, noches_min: null, noches_max: null,
+    usuario: "demo", origenes_extra: [], destinos_extra: [], fechas_extra: [], tramos_viaje: [], flex_dias: 0, chollo_desde: null, chollo_hasta: null, noches_min: null, noches_max: null,
     ida_salida_min: 0, ida_salida_max: 24, ida_llegada_min: 0, ida_llegada_max: 24,
     vuelta_salida_min: 0, vuelta_salida_max: 24, vuelta_llegada_min: 0, vuelta_llegada_max: 24,
     ninos: 0, bebes: 0, maletas_cabina: 0, maletas_20kg: 0, aplicar_descuentos: true, escalas_max: 1, escala_max_horas: 6,
@@ -60,6 +61,7 @@ function crearDatos() {
     {
       ...comun, id: "demo-3", nombre: "Navidad en Palma", modo: "fechas", ida_vuelta: true, origen: "MAD", destino: "PMI",
       fecha_ida: soloFecha(ida3), fecha_vuelta: soloFecha(ida3 + 5 * DIA), adultos: 2, maletas_20kg: 1, modo_precio: "mas_barato", presupuesto: null,
+      fechas_extra: [{ ida: soloFecha(ida3 + 7 * DIA), vuelta: soloFecha(ida3 + 12 * DIA) }, { ida: soloFecha(ida3 + 14 * DIA), vuelta: soloFecha(ida3 + 19 * DIA) }],
       proxima_revision: iso(ahora + 3 * MIN), ultima_revision: iso(ahora - 17 * MIN),
       mejor_precio: minimo("demo-3"), precio_actual: ultimo("demo-3"), estado: "14 opciones válidas", creada: iso(ahora - 5 * DIA),
       info: { variacion: ultimo("demo-3") - penultimo("demo-3"), rechazos: {} },
@@ -71,6 +73,18 @@ function crearDatos() {
       proxima_revision: iso(ahora + 41 * MIN), ultima_revision: iso(ahora - 19 * MIN),
       mejor_precio: minimo("demo-2"), precio_actual: ultimo("demo-2"), estado: "8 opciones válidas", creada: iso(ahora - 20 * DIA),
       info: { variacion: ultimo("demo-2") - penultimo("demo-2"), rechazos: {}, habitual: [70, 115] },
+    },
+    {
+      ...comun, id: "demo-4", nombre: "Cracovia y Zúrich", modo: "fechas", ida_vuelta: false, origen: "SVQ", destino: "KRK",
+      fecha_ida: soloFecha(ida1 + 10 * DIA), fecha_vuelta: null, adultos: 1, modo_precio: "mas_barato", presupuesto: null,
+      tramos_viaje: [
+        { origen: "SVQ", destino: "KRK", fecha: soloFecha(ida1 + 10 * DIA) },
+        { origen: "KRK", destino: "ZRH", fecha: soloFecha(ida1 + 13 * DIA) },
+        { origen: "ZRH", destino: "SVQ", fecha: soloFecha(ida1 + 16 * DIA) },
+      ],
+      proxima_revision: iso(ahora + 27 * MIN), ultima_revision: iso(ahora - 9 * MIN),
+      mejor_precio: minimo("demo-4"), precio_actual: ultimo("demo-4"), estado: "3 opciones válidas", creada: iso(ahora - 2 * DIA),
+      info: { variacion: ultimo("demo-4") - penultimo("demo-4"), rechazos: {} },
     },
   ];
 
@@ -104,6 +118,17 @@ function crearDatos() {
   const p3 = ultimo("demo-3");
   const palma = opcion(5, p3, p3 - 60, 60, [tramo("UX", "6011", "MAD", "PMI", ida3, "08:05", "09:20")],
     [tramo("UX", "6020", "PMI", "MAD", ida3 + 5 * DIA, "19:45", "21:05")], false);
+  // El viaje con varios destinos: un billete por vuelo
+  const p4 = ultimo("demo-4");
+  const v1 = ida1 + 10 * DIA;
+  const varios = opcion(6, p4, p4, 0, [tramo("FR", "7144", "SVQ", "KRK", v1, "06:30", "10:20")], [], true);
+  varios.detalle.vuelta = null;
+  varios.detalle.siguientes = [
+    { tramos: [tramo("LX", "1367", "KRK", "ZRH", v1 + 3 * DIA, "13:05", "15:00")], escalas: 0 },
+    { tramos: [tramo("VY", "6271", "ZRH", "BCN", v1 + 6 * DIA, "17:40", "19:30"), tramo("VY", "2224", "BCN", "SVQ", v1 + 6 * DIA, "21:00", "22:30")], escalas: 1 },
+  ];
+  varios.detalle.comprar = [1, 2, 3].map((n) => ({ texto: `Comprar el vuelo ${n}`, url: "https://www.google.com/travel/flights" }));
+  opciones.push({ ...varios, busqueda: "demo-4", revisado: iso(ahora - 9 * MIN), es_mejor: true, fecha_ida: soloFecha(v1), fecha_vuelta: soloFecha(v1 + 6 * DIA) });
   opciones.push(
     { ...lisboa, busqueda: "demo-2", revisado: iso(ahora - 19 * MIN), es_mejor: true, fecha_ida: soloFecha(idaLis), fecha_vuelta: soloFecha(vueltaLis) },
     { ...palma, busqueda: "demo-3", revisado: iso(ahora - 17 * MIN), es_mejor: true, fecha_ida: soloFecha(ida3), fecha_vuelta: soloFecha(ida3 + 5 * DIA) },

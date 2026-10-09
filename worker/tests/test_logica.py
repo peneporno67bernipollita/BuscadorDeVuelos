@@ -372,3 +372,67 @@ def test_google_sin_pagina_de_resultados():
     g._sin_datos_seguidos = 0
     with pytest.raises(SinResultados, match="cookies"):
         g._llamar(cookies)
+
+
+# ---------------- varias fechas y varios destinos ----------------
+
+def test_varias_fechas_en_una_busqueda():
+    from buscador import run, viaje
+
+    b = busqueda(fechas_extra=[{"ida": "2026-11-20", "vuelta": "2026-11-23"}, {"ida": "2026-11-15", "vuelta": "2026-11-19"},
+                               {"ida": "2026-11-27", "vuelta": "2026-11-25"}])
+    # Sin repetir la principal ni aceptar una vuelta anterior a la ida
+    assert viaje.pares_fechas(b) == [(date(2026, 11, 15), date(2026, 11, 19)), (date(2026, 11, 20), date(2026, 11, 23))]
+    assert viaje.primera_salida(b, date(2026, 11, 16)) == date(2026, 11, 20)
+    assert run._caducada(b, date(2026, 11, 18)) is False and run._caducada(b, date(2026, 11, 21)) is True
+    solo = busqueda(ida_vuelta=False, fecha_vuelta=None, fechas_extra=[{"ida": "2026-11-18"}])
+    assert viaje.pares_fechas(solo) == [(date(2026, 11, 15), None), (date(2026, 11, 18), None)]
+
+
+def test_viaje_con_varios_destinos(monkeypatch):
+    from types import SimpleNamespace
+
+    from buscador import enlaces, viaje
+    from buscador.avisos import mensaje_aviso
+    from buscador.decision import Decision
+    from buscador.fuentes import google_flights as gf
+
+    b = busqueda(ida_vuelta=False, fecha_vuelta=None, origen="SVQ", destino="KRK", fecha_ida="2026-11-13", tramos_viaje=[
+        {"origen": "SVQ", "destino": "KRK", "fecha": "2026-11-13"},
+        {"origen": "KRK", "destino": "ZRH", "fecha": "2026-11-16"},
+        {"origen": "ZRH", "destino": "SVQ", "fecha": "2026-11-19"},
+    ])
+    assert viaje.es_varios_destinos(b) and viaje.ruta_viaje(b) == ["SVQ", "KRK", "ZRH", "SVQ"]
+    vuelos = {
+        ("SVQ", "KRK"): [(120, "FR", datetime(2026, 11, 13, 7)), (90, "FR", datetime(2026, 11, 13, 20))],
+        ("KRK", "ZRH"): [(40, "XX", datetime(2026, 11, 16, 8)), (70, "FR", datetime(2026, 11, 16, 9))],  # XX: bloqueada
+        ("ZRH", "SVQ"): [(100, "IB", datetime(2026, 11, 19, 10)), (80, "FR", datetime(2026, 11, 19, 6))],
+    }
+    g = gf.GoogleFlights.__new__(gf.GoogleFlights)  # sin red
+    g._solo_ida_ruta = lambda b_, o, d, fecha, horas: [
+        SimpleNamespace(price=p, self_transfer=False, tr=Trayecto([tramo(a, o, d, s)])) for p, a, s in vuelos[(o, d)]]
+    monkeypatch.setattr(gf, "_a_trayecto", lambda r: r.tr)
+    monkeypatch.setattr(gf, "hoy", lambda: date(2026, 10, 1))
+    validador = Validador(b, AEROLINEAS)
+
+    opciones = g.varios_destinos(b, validador)
+    assert [o.precio_billetes for o in opciones] == [240, 270]  # 90 + 70 + 80, y la otra ida
+    mejor = opciones[0]
+    assert [t.origen for t in mejor.trayectos] == ["SVQ", "KRK", "ZRH"] and mejor.billetes_separados
+    assert validador.opcion(mejor) is None and len(mejor.a_dict()["siguientes"]) == 2
+
+    precios.calcular(mejor, b, None, AEROLINEAS)  # 1 maleta facturada en cada vuelo de Ryanair
+    assert mejor.precio_maletas == round(3 * 59.99, 2) and mejor.desglose_maletas[0].startswith("Vuelo 1")
+    assert [e["texto"] for e in enlaces.comprar_ya(b, mejor)] == ["Comprar el vuelo 1", "Comprar el vuelo 2", "Comprar el vuelo 3"]
+    assert enlaces.compra(b, mejor, AEROLINEAS)[0]["aerolinea"] == "Ryanair"
+    texto = mensaje_aviso(b, mejor, Decision(True, "chollo", "🔥 Chollo", "motivo"), enlaces.compra(b, mejor, AEROLINEAS),
+                          enlaces.google_flights(b, mejor), AEROLINEAS, None, comprar=enlaces.comprar_ya(b, mejor))
+    assert "Vuelo 3" in texto and "varios destinos" in texto and "Cracovia" in texto and "más baratos" not in texto
+
+    # Un vuelo que sale antes de que llegue el anterior no vale
+    al_reves = Opcion("google_flights", Trayecto([tramo("FR", "SVQ", "KRK", datetime(2026, 11, 16, 20))]), None, 100,
+                      siguientes=[Trayecto([tramo("FR", "KRK", "ZRH", datetime(2026, 11, 16, 9))]),
+                                  Trayecto([tramo("FR", "ZRH", "SVQ", datetime(2026, 11, 19, 6))])])
+    assert "antes" in validador.opcion(al_reves)
+    # Y si falta un vuelo del viaje, tampoco
+    assert validador.opcion(Opcion("x", mejor.ida, None, 1)) == "faltan vuelos del viaje"

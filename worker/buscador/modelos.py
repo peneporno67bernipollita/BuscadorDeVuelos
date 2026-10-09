@@ -92,10 +92,12 @@ class Opcion:
     precio_total: float = 0.0
     desglose_maletas: list[str] = field(default_factory=list)
     notas: list[str] = field(default_factory=list)
+    # Viaje con varios destinos: los vuelos que van después de la ida, en orden (cada uno, un billete)
+    siguientes: list[Trayecto] = field(default_factory=list)
 
     @property
     def trayectos(self) -> list[Trayecto]:
-        return [self.ida] + ([self.vuelta] if self.vuelta else [])
+        return [self.ida] + self.siguientes + ([self.vuelta] if self.vuelta else [])
 
     @property
     def tramos(self) -> list[Tramo]:
@@ -116,6 +118,7 @@ class Opcion:
             "fuente": self.fuente,
             "ida": self.ida.a_dict(),
             "vuelta": self.vuelta.a_dict() if self.vuelta else None,
+            "siguientes": [t.a_dict() for t in self.siguientes],
             "billetes_separados": self.billetes_separados,
             "vuelta_a_otro_aeropuerto": self.vuelta_a_otro_aeropuerto,
             "precio_billetes": round(self.precio_billetes, 2),

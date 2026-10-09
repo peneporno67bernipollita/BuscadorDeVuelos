@@ -1,10 +1,13 @@
 import { api } from "../api.js";
+import { aFecha, aIso, selectorFechas } from "../calendario.js";
 import { icono } from "../iconos.js";
 import {
   $, aeropuertos, aeropuertosCercanos, aviso, bandera, buscarAeropuertos, conCarga, esc, eur, fecha, nombreAeropuerto,
 } from "../util.js";
 
 const MAX_EXTRA = 3; // aeropuertos de salida alternativos
+const MAX_FECHAS = 5; // fechas alternativas del mismo viaje
+const MAX_VUELOS = 5; // vuelos de un viaje con varios destinos
 
 const hoyMas = (dias) => {
   const d = new Date();
@@ -12,6 +15,12 @@ const hoyMas = (dias) => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 };
 const hh = (h) => `${String(h).padStart(2, "0")}:00`;
+const sumarIso = (iso, dias) => {
+  const f = aFecha(iso) || new Date();
+  f.setDate(f.getDate() + dias);
+  return aIso(f);
+};
+const nochesTxt = (n) => (n === 0 ? "mismo día" : `${n} noche${n === 1 ? "" : "s"}`);
 
 const PREDETERMINADA = {
   nombre: "", modo: "fechas", ida_vuelta: true, origen: "", destino: "",
@@ -108,7 +117,7 @@ function filaSalida(i) {
 function rangoDoble(nombre, titulo, min, max) {
   return `
     <div class="franja" data-rango="${nombre}">
-      <div class="franja-cabecera"><span>${titulo}</span><span class="valor-franja"></span></div>
+      <div class="franja-cabecera"><span class="titulo-franja" data-normal="${titulo}" data-varios="${titulo.replace("Ida", "Cada vuelo")}">${titulo}</span><span class="valor-franja"></span></div>
       <div class="rango-doble">
         <div class="riel"></div><div class="relleno"></div>
         <input type="range" min="0" max="24" step="1" value="${min}" name="${nombre}_min" aria-label="${titulo}: desde">
@@ -163,6 +172,7 @@ export async function vistaFormulario(app, id, duplicar = false) {
     if (duplicar) b.nombre = `${b.nombre} (copia)`;
   }
   const editando = id && !duplicar;
+  const tipoInicial = (b.tramos_viaje || []).length >= 2 ? "varios" : b.ida_vuelta ? "ida_vuelta" : "solo_ida";
   const tieneDescuento = (perfil.familia_numerosa || "ninguna") !== "ninguna" || (perfil.residente || "ninguno") !== "ninguno";
   const opcionNumero = (desde, hasta, sel) =>
     Array.from({ length: hasta - desde + 1 }, (_, i) => desde + i).map((n) => `<option value="${n}" ${Number(sel) === n ? "selected" : ""}>${n}</option>`).join("");
@@ -185,14 +195,17 @@ export async function vistaFormulario(app, id, duplicar = false) {
               <label class="opcion-tarjeta"><input type="radio" name="modo" value="chollo" ${b.modo === "chollo" ? "checked" : ""}>
                 <span class="icono-opcion">${icono("llama")}</span><span><b>Chollo</b><small>Cualquier fecha de un periodo, si aparece un precio muy por debajo de lo normal.</small></span></label>
             </div>
-            <div class="segmentado">
-              <label><input type="radio" name="ida_vuelta" value="1" ${b.ida_vuelta ? "checked" : ""}>${icono("intercambiar")}Ida y vuelta</label>
-              <label><input type="radio" name="ida_vuelta" value="0" ${!b.ida_vuelta ? "checked" : ""}>${icono("flecha")}Solo ida</label>
+            <div class="segmentado" role="radiogroup" aria-label="Tipo de viaje">
+              <label><input type="radio" name="tipo_viaje" value="ida_vuelta" ${tipoInicial === "ida_vuelta" ? "checked" : ""}>${icono("intercambiar")}Ida y vuelta</label>
+              <label><input type="radio" name="tipo_viaje" value="solo_ida" ${tipoInicial === "solo_ida" ? "checked" : ""}>${icono("flecha")}Solo ida</label>
+              <label id="opcion-varios"><input type="radio" name="tipo_viaje" value="varios" ${tipoInicial === "varios" ? "checked" : ""}>${icono("ubicacion")}Varios destinos</label>
             </div>
+            <p class="ayuda" id="ayuda-tipo"></p>
           </section>
 
           <section class="tarjeta seccion-form">
-            <div class="tarjeta-titulo"><h2><span class="numero">2</span>Aeropuertos</h2></div>
+            <div class="tarjeta-titulo"><h2><span class="numero">2</span><span id="titulo-ruta">Aeropuertos</span></h2></div>
+            <div id="bloque-ruta">
             <div class="aeropuertos">
               <div class="campo"><label>Salida</label><div id="origen"></div></div>
               <button type="button" class="icono intercambiar" id="intercambiar" title="Intercambiar origen y destino">${icono("intercambiar")}</button>
@@ -205,25 +218,41 @@ export async function vistaFormulario(app, id, duplicar = false) {
             <p class="ayuda">¿Te vale salir de varios sitios (p. ej. Jerez o Sevilla)? Añade hasta ${MAX_EXTRA} aeropuertos de salida más:
               el robot busca desde todos a la vez hacia tu llegada. Solo se aceptan vuelos de los aeropuertos que elijas
               (ojo: París tiene CDG, Orly y Beauvais, a 85 km); las escalas intermedias dan igual.</p>
+            </div>
+            <div id="bloque-varios" class="oculto">
+              <ol class="vuelos-viaje" id="vuelos-viaje"></ol>
+              <button type="button" class="fantasma pequeno" id="anadir-vuelo" style="margin-top:.6rem">${icono("mas")}Añadir otro vuelo</button>
+              <p class="ayuda">Cada vuelo es un billete de solo ida: el robot busca el más barato de cada uno (con tus horarios,
+                escalas y aerolíneas), comprueba que encajan uno detrás de otro y te avisa con el total. Hasta ${MAX_VUELOS} vuelos.</p>
+            </div>
           </section>
 
           <section class="tarjeta seccion-form">
             <div class="tarjeta-titulo"><h2><span class="numero">3</span>Fechas</h2></div>
-            <div id="bloque-fechas" class="columnas">
-              <div class="campo"><label for="fecha_ida">Ida</label><input type="date" id="fecha_ida" value="${b.fecha_ida || ""}"></div>
-              <div class="campo con-vuelta"><label for="fecha_vuelta">Vuelta</label><input type="date" id="fecha_vuelta" value="${b.fecha_vuelta || ""}"></div>
+            <div id="bloque-fechas">
+              <div class="fechas-principal">
+              <div class="campo"><label>Fechas</label><div id="fechas-principales"></div>
+                <input type="hidden" id="fecha_ida" value="${b.fecha_ida || ""}"><input type="hidden" id="fecha_vuelta" value="${b.fecha_vuelta || ""}"></div>
               <div class="campo"><label for="flex_dias">Margen</label>
                 <select id="flex_dias">${[0, 1, 2, 3].map((n) => `<option value="${n}" ${b.flex_dias === n ? "selected" : ""}>${n ? `± ${n} día${n > 1 ? "s" : ""}` : "Fechas exactas"}</option>`).join("")}</select>
                 <div class="ayuda">Mueve ida y vuelta juntas para encontrar el día más barato.</div></div>
+              </div>
+              <div class="fechas-extra" id="fechas-extra"></div>
+              <button type="button" class="fantasma pequeno" id="anadir-fechas" style="margin-top:.7rem">${icono("mas")}Añadir otras fechas</button>
+              <p class="ayuda">¿Te valen varias fechas para el mismo viaje? Añade hasta ${MAX_FECHAS} más: el robot las vigila todas
+                en esta búsqueda y te avisa de la más barata (cada fecha de más alarga un poco cada revisión).</p>
             </div>
-            <div id="bloque-chollo" class="columnas">
-              <div class="campo"><label for="chollo_desde">Desde</label><input type="date" id="chollo_desde" value="${b.chollo_desde || ""}"></div>
-              <div class="campo"><label for="chollo_hasta">Hasta</label><input type="date" id="chollo_hasta" value="${b.chollo_hasta || ""}">
+            <div id="bloque-chollo">
+              <div class="fechas-principal">
+              <div class="campo"><label>Periodo</label><div id="fechas-chollo"></div>
+                <input type="hidden" id="chollo_desde" value="${b.chollo_desde || ""}"><input type="hidden" id="chollo_hasta" value="${b.chollo_hasta || ""}">
                 <div class="ayuda">Google busca hasta unos 10 meses vista.</div></div>
               <div class="campo con-vuelta"><label>Noches de estancia</label>
                 <div class="fila" style="flex-wrap:nowrap"><select id="noches_min">${opcionNumero(1, 30, b.noches_min)}</select><span class="suave">a</span>
                 <select id="noches_max">${opcionNumero(1, 30, b.noches_max)}</select></div></div>
+              </div>
             </div>
+            <div class="nota oculto" id="nota-varios-fechas">${icono("info")}<span>Cada vuelo lleva su propia fecha: elígelas arriba, en «Vuelos del viaje».</span></div>
           </section>
 
           <section class="tarjeta seccion-form">
@@ -309,6 +338,123 @@ export async function vistaFormulario(app, id, duplicar = false) {
 
   form.querySelectorAll("[data-rango]").forEach(activarRango);
 
+  // ---- Tipo de viaje
+  const tipoViaje = () => valorRadio("tipo_viaje");
+  const esVarios = () => tipoViaje() === "varios" && valorRadio("modo") === "fechas";
+  const esIdaVuelta = () => tipoViaje() === "ida_vuelta";
+  const HOY = hoyMas(0);
+  const MAXIMO = hoyMas(330); // Google busca hasta unos 11 meses vista
+
+  // ---- Calendarios propios (los campos ocultos guardan las fechas como antes)
+  const principal = selectorFechas($("#fechas-principales"), {
+    inicio: b.fecha_ida, fin: b.fecha_vuelta, rango: tipoInicial === "ida_vuelta", etiquetas: ["Ida", "Vuelta"],
+    duracion: nochesTxt, min: HOY, max: MAXIMO, nombre: "Fechas del viaje",
+    alCambiar: (ida, vuelta) => {
+      $("#fecha_ida").value = ida || "";
+      $("#fecha_vuelta").value = vuelta || "";
+      actualizar();
+    },
+  });
+  selectorFechas($("#fechas-chollo"), {
+    inicio: b.chollo_desde, fin: b.chollo_hasta, rango: true, etiquetas: ["Desde", "Hasta"],
+    duracion: (n) => `${n + 1} días`, min: HOY, max: MAXIMO, nombre: "Periodo del chollo",
+    alCambiar: (desde, hasta) => {
+      $("#chollo_desde").value = desde || "";
+      $("#chollo_hasta").value = hasta || "";
+      actualizar();
+    },
+  });
+
+  // ---- Fechas alternativas del mismo viaje
+  let extras = (b.fechas_extra || []).map((p) => ({ ida: p.ida, vuelta: p.vuelta || null }));
+  const pintarExtras = (enfocar = -1) => {
+    const caja = $("#fechas-extra");
+    caja.innerHTML = extras.map((_, i) => `
+      <div class="fila-fechas" data-extra="${i}">
+        <span class="num-fechas" aria-hidden="true">${i + 2}</span>
+        <div class="campo" data-selector></div>
+        <button type="button" class="icono pequeno fantasma" data-quitar-extra="${i}" title="Quitar estas fechas" aria-label="Quitar las fechas ${i + 2}">${icono("cruz")}</button>
+      </div>`).join("");
+    extras.forEach((p, i) => {
+      selectorFechas(caja.querySelector(`[data-extra="${i}"] [data-selector]`), {
+        inicio: p.ida, fin: p.vuelta, rango: esIdaVuelta(), etiquetas: ["Ida", "Vuelta"], duracion: nochesTxt,
+        min: HOY, max: MAXIMO, nombre: `Fechas ${i + 2}`,
+        alCambiar: (ida, vuelta) => {
+          extras[i] = { ida, vuelta };
+          actualizar();
+        },
+      });
+    });
+    if (enfocar >= 0) caja.querySelector(`[data-extra="${enfocar}"] .billete-parte`)?.focus();
+    $("#anadir-fechas").classList.toggle("oculto", extras.length >= MAX_FECHAS);
+  };
+  const anadirFechas = () => {
+    if (extras.length >= MAX_FECHAS) return;
+    const base = extras.at(-1) || { ida: $("#fecha_ida").value || hoyMas(45), vuelta: $("#fecha_vuelta").value || null };
+    extras.push({ ida: sumarIso(base.ida, 7), vuelta: esIdaVuelta() ? sumarIso(base.vuelta || base.ida, 7) : null });
+    pintarExtras(extras.length - 1);
+    actualizar();
+  };
+
+  // ---- Vuelos de un viaje con varios destinos
+  let tramos = (b.tramos_viaje || []).length >= 2 ? b.tramos_viaje.map((t) => ({ ...t })) : null;
+  const pintarTramos = (enfocar = -1) => {
+    const lista = $("#vuelos-viaje");
+    lista.innerHTML = tramos.map((_, i) => `
+      <li class="vuelo-viaje" data-tramo="${i}">
+        <div class="vuelo-viaje-cabecera"><span class="numero-vuelo">${icono("avion")}Vuelo ${i + 1}</span>
+          ${tramos.length > 2 ? `<button type="button" class="icono pequeno fantasma" data-quitar-tramo="${i}" title="Quitar este vuelo" aria-label="Quitar el vuelo ${i + 1}">${icono("cruz")}</button>` : ""}</div>
+        <div class="vuelo-viaje-campos">
+          <div class="campo"><label>Sale de</label><div data-o></div></div>
+          <div class="campo"><label>Llega a</label><div data-d></div></div>
+          <div class="campo campo-fecha-vuelo"><label>Fecha</label><div data-f></div></div>
+        </div>
+      </li>`).join("");
+    const salidasTramo = [];
+    tramos.forEach((t, i) => {
+      const fila = lista.querySelector(`[data-tramo="${i}"]`);
+      salidasTramo[i] = montarAeropuerto(fila.querySelector("[data-o]"), datos, t.origen, (c) => {
+        tramos[i].origen = c;
+        actualizar();
+      });
+      montarAeropuerto(fila.querySelector("[data-d]"), datos, t.destino, (c) => {
+        tramos[i].destino = c;
+        // El vuelo siguiente sale, si no tiene salida, de donde llega este
+        if (c && tramos[i + 1] && !tramos[i + 1].origen) {
+          tramos[i + 1].origen = c;
+          salidasTramo[i + 1]?.poner(c);
+        }
+        actualizar();
+      });
+      selectorFechas(fila.querySelector("[data-f]"), {
+        inicio: t.fecha, rango: false, etiquetas: [`Vuelo ${i + 1}`], min: HOY, max: MAXIMO, nombre: `Fecha del vuelo ${i + 1}`,
+        alCambiar: (f) => {
+          tramos[i].fecha = f;
+          actualizar();
+        },
+      });
+      if (i === enfocar) fila.querySelector(`[data-${tramos[i].origen ? "d" : "o"}] input`)?.focus();
+    });
+    $("#anadir-vuelo").classList.toggle("oculto", tramos.length >= MAX_VUELOS);
+  };
+  const prepararTramos = () => {
+    if (tramos) return;
+    const ida = $("#fecha_ida").value || hoyMas(45);
+    tramos = [
+      { origen: origen || "", destino: destino || "", fecha: ida },
+      { origen: destino || "", destino: "", fecha: sumarIso(ida, 3) },
+    ];
+    pintarTramos();
+  };
+  const anadirTramo = () => {
+    if (tramos.length >= MAX_VUELOS) return;
+    const ultimo = tramos.at(-1);
+    tramos.push({ origen: ultimo.destino || "", destino: "", fecha: sumarIso(ultimo.fecha || HOY, 3) });
+    pintarTramos(tramos.length - 1);
+    actualizar();
+  };
+  const paradas = () => (tramos ? [tramos[0].origen, ...tramos.map((t) => t.destino)] : []);
+
   const pintarLlegadas = () => form.querySelectorAll("[data-llegada]").forEach((el) => {
     el.innerHTML = destino ? `${icono("avion")}${esc(nombreAeropuerto(datos, destino))}` : '<span class="tenue">Elige la llegada arriba</span>';
   });
@@ -346,7 +492,21 @@ export async function vistaFormulario(app, id, duplicar = false) {
   form.addEventListener("click", (ev) => {
     const quitar = ev.target.closest("[data-quitar-fila]");
     const cercano = ev.target.closest("[data-cercano]");
-    if (quitar) {
+    const quitarExtra = ev.target.closest("[data-quitar-extra]");
+    const quitarTramo = ev.target.closest("[data-quitar-tramo]");
+    if (quitarExtra) {
+      extras.splice(Number(quitarExtra.dataset.quitarExtra), 1);
+      pintarExtras();
+      actualizar();
+    } else if (quitarTramo) {
+      tramos.splice(Number(quitarTramo.dataset.quitarTramo), 1);
+      pintarTramos();
+      actualizar();
+    } else if (ev.target.closest("#anadir-fechas")) {
+      anadirFechas();
+    } else if (ev.target.closest("#anadir-vuelo")) {
+      anadirTramo();
+    } else if (quitar) {
       salidas.splice(Number(quitar.dataset.quitarFila), 1);
       pintarSalidas();
       actualizar();
@@ -390,10 +550,30 @@ export async function vistaFormulario(app, id, duplicar = false) {
     actualizar();
   });
 
+  let tipoPintado = tipoInicial;
   function actualizar() {
     const modo = valorRadio("modo");
-    const idaVuelta = valorRadio("ida_vuelta") === "1";
-    $("#bloque-fechas").classList.toggle("oculto", modo !== "fechas");
+    // Un viaje con varios destinos va siempre con fechas concretas
+    const opcionVarios = $("#opcion-varios input");
+    opcionVarios.disabled = modo === "chollo";
+    if (modo === "chollo" && opcionVarios.checked) form.querySelector('input[name="tipo_viaje"][value="ida_vuelta"]').checked = true;
+    const varios = esVarios();
+    const idaVuelta = esIdaVuelta();
+    if (tipoViaje() !== tipoPintado) {
+      tipoPintado = tipoViaje();
+      principal.ponerRango(idaVuelta);
+      pintarExtras();
+      if (varios) prepararTramos();
+    }
+    $("#ayuda-tipo").textContent = modo === "chollo"
+      ? "Varios destinos solo está con fechas concretas."
+      : varios ? "Por ejemplo Sevilla → Cracovia → Zúrich → Sevilla: cada vuelo con su fecha." : "";
+    $("#bloque-ruta").classList.toggle("oculto", varios);
+    $("#bloque-varios").classList.toggle("oculto", !varios);
+    $("#titulo-ruta").textContent = varios ? "Vuelos del viaje" : "Aeropuertos";
+    $("#nota-varios-fechas").classList.toggle("oculto", !varios);
+    form.querySelectorAll(".titulo-franja").forEach((el) => (el.textContent = varios ? el.dataset.varios : el.dataset.normal));
+    $("#bloque-fechas").classList.toggle("oculto", modo !== "fechas" || varios);
     $("#bloque-chollo").classList.toggle("oculto", modo !== "chollo");
     form.querySelectorAll(".con-vuelta").forEach((el) => el.classList.toggle("oculto", !idaVuelta));
     $("#bloque-presupuesto").classList.toggle("oculto", valorRadio("modo_precio") !== "presupuesto");
@@ -412,14 +592,20 @@ export async function vistaFormulario(app, id, duplicar = false) {
     }
     // Resumen en vivo
     const pax = num("adultos") + num("ninos") + num("bebes");
-    const fechas = modo === "fechas"
-      ? `${fecha($("#fecha_ida").value) || "—"}${idaVuelta ? ` → ${fecha($("#fecha_vuelta").value) || "—"}` : ""}${num("flex_dias") ? ` (±${num("flex_dias")} d)` : ""}`
-      : `Del ${fecha($("#chollo_desde").value) || "—"} al ${fecha($("#chollo_hasta").value) || "—"}`;
+    const otras = extras.filter((p) => p.ida).length;
+    const fechas = varios
+      ? `${tramos.length} vuelos · ${fecha(tramos[0].fecha) || "—"} → ${fecha(tramos.at(-1).fecha) || "—"}`
+      : modo === "fechas"
+        ? `${fecha($("#fecha_ida").value) || "—"}${idaVuelta ? ` → ${fecha($("#fecha_vuelta").value) || "—"}` : ""}${num("flex_dias") ? ` (±${num("flex_dias")} d)` : ""}${otras ? ` · y ${otras} fecha${otras > 1 ? "s" : ""} más` : ""}`
+        : `Del ${fecha($("#chollo_desde").value) || "—"} al ${fecha($("#chollo_hasta").value) || "—"}`;
+    const recorrido = varios
+      ? `<b>${esc(paradas().map((c) => (c ? nombreAeropuerto(datos, c, false) : "…")).join(" → "))}</b><br>varios destinos`
+      : `<b>${origen ? esc(nombresSalida()) : "Elige salida"}</b><br>${destino ? esc(nombreAeropuerto(datos, destino)) : "Elige llegada"}${idaVuelta ? " · ida y vuelta" : " · solo ida"}`;
     const precio = valorRadio("modo_precio") === "presupuesto"
       ? `Avisar si baja de ${$("#presupuesto").value ? eur($("#presupuesto").value) : "…"}`
       : "Avisar en el mejor momento";
     $("#resumen").innerHTML = `
-      <li>${icono("avion")}<span><b>${origen ? esc(nombresSalida()) : "Elige salida"}</b><br>${destino ? esc(nombreAeropuerto(datos, destino)) : "Elige llegada"}${idaVuelta ? " · ida y vuelta" : " · solo ida"}</span></li>
+      <li>${icono("avion")}<span>${recorrido}</span></li>
       <li>${icono("calendario")}<span>${esc(fechas)}</span></li>
       <li>${icono("personas")}<span>${pax} pasajero${pax !== 1 ? "s" : ""} · ${num("maletas_cabina")} cabina · ${num("maletas_20kg")} facturada${num("maletas_20kg") !== 1 ? "s" : ""}</span></li>
       <li>${icono("despegue")}<span>${valorRadio("escalas_max") === "0" ? "Solo directos" : `Hasta ${valorRadio("escalas_max")} escala${valorRadio("escalas_max") === "2" ? "s" : ""} de ${$("#escala_max_horas").value} h`}</span></li>
@@ -428,12 +614,15 @@ export async function vistaFormulario(app, id, duplicar = false) {
   form.addEventListener("input", actualizar);
   form.addEventListener("change", actualizar);
   pintarSalidas();
+  pintarExtras();
+  if (tramos) pintarTramos();
   actualizar();
 
   form.addEventListener("submit", async (ev) => {
     ev.preventDefault();
     const modo = valorRadio("modo");
-    const idaVuelta = valorRadio("ida_vuelta") === "1";
+    const varios = esVarios();
+    const idaVuelta = !varios && esIdaVuelta();
     const d = {
       modo, ida_vuelta: idaVuelta, origen, destino,
       adultos: num("adultos"), ninos: num("ninos"), bebes: num("bebes"),
@@ -451,7 +640,15 @@ export async function vistaFormulario(app, id, duplicar = false) {
         d[`${s}_${c}_max`] = usar ? Number(form.querySelector(`[name="${s}_${c}_max"]`).value) : 24;
       }
     }
-    if (modo === "fechas") {
+    const fechasExtra = !varios && modo === "fechas"
+      ? extras.filter((p) => p.ida).map((p) => (idaVuelta ? { ida: p.ida, vuelta: p.vuelta } : { ida: p.ida }))
+      : [];
+    const vuelosViaje = varios ? tramos.map((t) => ({ origen: t.origen, destino: t.destino, fecha: t.fecha })) : [];
+    if (varios) {
+      d.origen = vuelosViaje[0].origen || null;
+      d.destino = vuelosViaje[0].destino || null;
+      d.fecha_ida = vuelosViaje[0].fecha || null;
+    } else if (modo === "fechas") {
       d.fecha_ida = $("#fecha_ida").value || null;
       d.fecha_vuelta = idaVuelta ? $("#fecha_vuelta").value || null : null;
       d.flex_dias = num("flex_dias");
@@ -466,9 +663,25 @@ export async function vistaFormulario(app, id, duplicar = false) {
 
     const errores = [];
     const hoy = hoyMas(0);
-    if (!origen || !destino) errores.push("Elige los dos aeropuertos de la lista.");
-    if (origen && origen === destino) errores.push("El aeropuerto de salida y el de llegada no pueden ser el mismo.");
-    if (modo === "fechas") {
+    if (varios) {
+      if (vuelosViaje.some((t) => !t.origen || !t.destino)) errores.push("Elige de la lista los aeropuertos de cada vuelo.");
+      vuelosViaje.forEach((t, i) => {
+        if (t.origen && t.origen === t.destino) errores.push(`En el vuelo ${i + 1} la salida y la llegada son el mismo aeropuerto.`);
+        if (!t.fecha) errores.push(`Pon la fecha del vuelo ${i + 1}.`);
+        else if (i && vuelosViaje[i - 1].fecha && t.fecha < vuelosViaje[i - 1].fecha) errores.push(`El vuelo ${i + 1} no puede ser antes que el ${i}.`);
+      });
+      if (vuelosViaje[0].fecha && vuelosViaje[0].fecha < hoy) errores.push("El primer vuelo ya ha pasado.");
+    } else {
+      if (!origen || !destino) errores.push("Elige los dos aeropuertos de la lista.");
+      if (origen && origen === destino) errores.push("El aeropuerto de salida y el de llegada no pueden ser el mismo.");
+    }
+    fechasExtra.forEach((p, i) => {
+      if (p.ida < hoy) errores.push(`Las fechas ${i + 2} ya han pasado.`);
+      if (idaVuelta && (!p.vuelta || p.vuelta < p.ida)) errores.push(`En las fechas ${i + 2}, la vuelta debe ser el mismo día o después de la ida.`);
+    });
+    if (varios) {
+      // (fechas de cada vuelo, ya comprobadas arriba)
+    } else if (modo === "fechas") {
       if (!d.fecha_ida) errores.push("Pon la fecha de ida.");
       else if (d.fecha_ida < hoy) errores.push("La fecha de ida ya ha pasado.");
       if (idaVuelta && (!d.fecha_vuelta || d.fecha_vuelta < d.fecha_ida)) errores.push("La vuelta debe ser el mismo día o después de la ida.");
@@ -488,9 +701,13 @@ export async function vistaFormulario(app, id, duplicar = false) {
     if (errores.length) return;
 
     // Solo se envían si se usan (así no hace falta haber actualizado la base de datos si no los usas)
-    if (salidasValidas().length || "origenes_extra" in b) d.origenes_extra = salidasValidas();
+    if (salidasValidas().length || "origenes_extra" in b) d.origenes_extra = varios ? [] : salidasValidas();
     if ("destinos_extra" in b) d.destinos_extra = []; // la llegada es siempre una
-    d.nombre = $("#nombre").value.trim() || `${nombreAeropuerto(datos, origen, false)} → ${nombreAeropuerto(datos, destino, false)}`;
+    if (fechasExtra.length || "fechas_extra" in b) d.fechas_extra = fechasExtra;
+    if (varios || "tramos_viaje" in b) d.tramos_viaje = vuelosViaje;
+    d.nombre = $("#nombre").value.trim() || (varios
+      ? paradas().map((c) => nombreAeropuerto(datos, c, false)).join(" → ")
+      : `${nombreAeropuerto(datos, origen, false)} → ${nombreAeropuerto(datos, destino, false)}`);
     try {
       const guardada = await conCarga(ev.submitter, editando ? api.actualizarBusqueda(id, d) : api.crearBusqueda(d));
       aviso(editando ? "Cambios guardados: el robot la revisa en un minuto" : "¡Búsqueda creada! El robot la revisa en un minuto");

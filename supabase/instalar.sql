@@ -253,14 +253,14 @@ begin
         new.ida_salida_min, new.ida_salida_max, new.ida_llegada_min, new.ida_llegada_max,
         new.vuelta_salida_min, new.vuelta_salida_max, new.vuelta_llegada_min, new.vuelta_llegada_max,
         new.adultos, new.ninos, new.bebes, new.maletas_cabina, new.maletas_20kg, new.aplicar_descuentos,
-        new.escalas_max, new.escala_max_horas)
+        new.escalas_max, new.escala_max_horas, new.fechas_extra, new.tramos_viaje)
        is distinct from
        (old.modo, old.ida_vuelta, old.origen, old.destino, old.origenes_extra, old.destinos_extra, old.fecha_ida, old.fecha_vuelta, old.flex_dias,
         old.chollo_desde, old.chollo_hasta, old.noches_min, old.noches_max,
         old.ida_salida_min, old.ida_salida_max, old.ida_llegada_min, old.ida_llegada_max,
         old.vuelta_salida_min, old.vuelta_salida_max, old.vuelta_llegada_min, old.vuelta_llegada_max,
         old.adultos, old.ninos, old.bebes, old.maletas_cabina, old.maletas_20kg, old.aplicar_descuentos,
-        old.escalas_max, old.escala_max_horas) then
+        old.escalas_max, old.escala_max_horas, old.fechas_extra, old.tramos_viaje) then
       new.historial_desde := now();
       new.mejor_precio := null;
       new.precio_actual := null;
@@ -520,6 +520,53 @@ $$;
 revoke execute on function public.accesos_desde(timestamptz) from public, anon, authenticated;
 grant execute on function public.accesos_desde(timestamptz) to service_role;
 
+-- =====================================================================
+-- Actualización v9: varias fechas en una misma búsqueda y viajes con varios destinos
+-- =====================================================================
+-- fechas_extra: otras fechas del mismo viaje, [{"ida": "2026-11-20", "vuelta": "2026-11-23"}, ...] (hasta 5)
+-- tramos_viaje: viaje con varios destinos, [{"origen": "SVQ", "destino": "KRK", "fecha": "2026-11-13"}, ...] (2 a 5)
+alter table public.busquedas add column if not exists fechas_extra jsonb not null default '[]'::jsonb;
+alter table public.busquedas add column if not exists tramos_viaje jsonb not null default '[]'::jsonb;
+
+create or replace function public.fechas_extra_validas(f jsonb)
+returns boolean language sql immutable set search_path = public as $$
+  select jsonb_typeof(f) = 'array' and jsonb_array_length(f) <= 5
+    and not exists (
+      select 1 from jsonb_array_elements(f) e
+      where jsonb_typeof(e) <> 'object'
+         or coalesce(e ->> 'ida', '') !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+         or (coalesce(e ->> 'vuelta', '') <> '' and (e ->> 'vuelta' !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+             or e ->> 'vuelta' < e ->> 'ida')))
+$$;
+
+create or replace function public.tramos_viaje_validos(t jsonb)
+returns boolean language sql immutable set search_path = public as $$
+  select jsonb_typeof(t) = 'array' and jsonb_array_length(t) <= 5 and jsonb_array_length(t) <> 1
+    and not exists (
+      select 1 from jsonb_array_elements(t) e
+      where jsonb_typeof(e) <> 'object'
+         or coalesce(e ->> 'origen', '') !~ '^[A-Z]{3}$' or coalesce(e ->> 'destino', '') !~ '^[A-Z]{3}$'
+         or e ->> 'origen' = e ->> 'destino'
+         or coalesce(e ->> 'fecha', '') !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+    -- en orden: cada vuelo, el mismo día que el anterior o después
+    and not exists (
+      select 1 from jsonb_array_elements(t) with ordinality a(e, i)
+      join jsonb_array_elements(t) with ordinality b(e, i) on b.i = a.i + 1
+      where b.e ->> 'fecha' < a.e ->> 'fecha')
+$$;
+
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'busquedas_viaje_valido') then
+    alter table public.busquedas add constraint busquedas_viaje_valido check (
+      public.fechas_extra_validas(fechas_extra) and public.tramos_viaje_validos(tramos_viaje)
+      -- un viaje con varios destinos va con fechas concretas, sin vuelta aparte ni fechas alternativas
+      and (tramos_viaje = '[]'::jsonb or (modo = 'fechas' and not ida_vuelta and fechas_extra = '[]'::jsonb))
+      and (fechas_extra = '[]'::jsonb or modo = 'fechas')) not valid;
+  end if;
+end;
+$$;
+
 -- Que la API de Supabase vea al momento las columnas nuevas
 notify pgrst, 'reload schema';
 
@@ -606,7 +653,7 @@ insert into public.aerolineas (codigo, nombre, permitida, criterio, web_oficial,
   ('H2', 'SKY Airline', true, 'AirlineRatings 2026: top 25 low cost (nº25)', 'https://www.skyairline.com', 50, 80, 80, 80, 'tramo', null, 'La tarifa básica solo incluye un bolso pequeño; maletas = máximo publicado (estimación).')
 on conflict (codigo) do nothing;
 
--- Comprobación final (debe salir: 8 tablas, 77 aerolíneas, 3 webs, versión 2 = 1, versión 3 = 2, versión 5 = 3, versión 6 = 5, versión 7 = 6, versión 8 = 1;
+-- Comprobación final (debe salir: 8 tablas, 77 aerolíneas, 3 webs, versión 2 = 1, versión 3 = 2, versión 5 = 3, versión 6 = 5, versión 7 = 6, versión 8 = 1, versión 9 = 2;
 -- accesos registrados por Supabase: más de 0 si has usado la web este mes)
 select 'Tablas creadas' as comprobacion, count(*) as total from information_schema.tables
   where table_schema = 'public' and table_name in
@@ -629,5 +676,7 @@ union all select 'Versión 7 instalada (seguridad reforzada)', (select count(*) 
 union all select 'Versión 8 instalada (avisos de acceso)', count(*) from pg_proc
   where proname = 'accesos_desde' and pronamespace = 'public'::regnamespace
   and not has_function_privilege('anon', oid, 'execute') and not has_function_privilege('authenticated', oid, 'execute')
+union all select 'Versión 9 instalada (varias fechas y varios destinos)', count(*) from information_schema.columns
+  where table_schema = 'public' and table_name = 'busquedas' and column_name in ('fechas_extra', 'tramos_viaje')
 union all select 'Accesos registrados por Supabase (últimos 30 días)', count(*) from auth.audit_log_entries
   where created_at > now() - interval '30 days';

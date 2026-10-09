@@ -277,13 +277,33 @@ export function maletasTexto(b) {
   return m.length ? `Maletas: ${m.join(", ")}` : "Sin maletas extra";
 }
 
+/** Vuelos de un viaje con varios destinos (Sevilla → Cracovia → Zúrich → Sevilla), o null si no lo es. */
+export const tramosViaje = (b) => (b?.modo === "fechas" && (b.tramos_viaje || []).length >= 2 ? b.tramos_viaje : null);
+
+/** Recorrido de un viaje con varios destinos: fichas de panel de salidas unidas por aviones. */
+export function recorridoHtml(datos, b, grande = false) {
+  const tramos = tramosViaje(b);
+  if (!tramos) return "";
+  const paradas = [tramos[0].origen, ...tramos.map((t) => t.destino)];
+  const ciudad = (c) => datos?.mapa?.get(c)?.es || datos?.mapa?.get(c)?.m || c;
+  return `
+    <div class="recorrido ${grande ? "grande" : ""}" role="img" aria-label="${esc(paradas.map(ciudad).join(", luego "))}">
+      ${paradas.map((c, i) => `${i ? `<span class="paso-ruta" aria-hidden="true">${icono("avion")}</span>` : ""}${tablero(c)}`).join("")}
+    </div>
+    <div class="recorrido-ciudades">${esc(paradas.map(ciudad).join(" → "))}</div>`;
+}
+
 export function fechasTexto(b) {
+  const tramos = tramosViaje(b);
+  if (tramos) return `${tramos.length} vuelos · ${fecha(tramos[0].fecha)} → ${fecha(tramos.at(-1).fecha)}`;
   if (b.modo === "chollo") {
     const noches = b.ida_vuelta ? ` · ${b.noches_min}-${b.noches_max} noches` : "";
     return `Del ${fecha(b.chollo_desde)} al ${fecha(b.chollo_hasta)}${noches}`;
   }
   const flex = b.flex_dias ? ` (±${b.flex_dias} d)` : "";
-  return b.ida_vuelta ? `${fecha(b.fecha_ida)} → ${fecha(b.fecha_vuelta)}${flex}` : `${fecha(b.fecha_ida)}${flex} · solo ida`;
+  const extra = (b.fechas_extra || []).length;
+  const otras = extra ? ` · y ${extra} fecha${extra > 1 ? "s" : ""} más` : "";
+  return b.ida_vuelta ? `${fecha(b.fecha_ida)} → ${fecha(b.fecha_vuelta)}${flex}${otras}` : `${fecha(b.fecha_ida)}${flex} · solo ida${otras}`;
 }
 
 export function generarCodigo() {
@@ -327,6 +347,17 @@ export function fechasPrecioHtml(p) {
   };
   const ida = p.ida ?? p.detalle?.ida;
   const vuelta = p.vuelta ?? p.detalle?.vuelta;
+  const siguientes = p.siguientes ?? p.detalle?.siguientes ?? [];
+  if (siguientes.length) {
+    // Varios destinos: un hueco por vuelo y los días que dura el viaje
+    const vuelos = [ida, ...siguientes];
+    const dias = diasEntre(vuelos[0].tramos[0].salida, vuelos.at(-1).tramos[0].salida);
+    return `
+      <div class="fp varios" aria-label="Vuelos de este precio">
+        ${vuelos.map((tr, i) => tramo(`Vuelo ${i + 1}`, tr.tramos[0].salida.slice(0, 10), tr)).join("")}
+        <div class="fp-noches">${icono("luna")}${dias} noche${dias === 1 ? "" : "s"} de viaje</div>
+      </div>`;
+  }
   const noches = p.fecha_vuelta ? diasEntre(p.fecha_ida, p.fecha_vuelta) : null;
   return `
     <div class="fp ${p.fecha_vuelta ? "" : "solo-ida"}" aria-label="Vuelos de este precio">

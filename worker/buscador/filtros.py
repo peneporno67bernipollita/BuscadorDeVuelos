@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Collection
 
 from .modelos import Opcion, Trayecto
+from .viaje import tramos_viaje
 
 MINUTOS_DIA = 24 * 60
 MAX_AEROPUERTOS = 4  # por lado (el principal y hasta 3 alternativos)
@@ -114,7 +115,29 @@ class Validador:
             return ("Ida: " if sentido == "ida" else "Vuelta: ") + motivo
         return validar_aerolineas(Opcion(fuente="", ida=trayecto, vuelta=None, precio_billetes=0), self.aerolineas)
 
+    def tramo(self, trayecto: Trayecto, origen: str, destino: str, numero: int) -> str | None:
+        """Un vuelo de un viaje con varios destinos (con los horarios de la ida para todos)."""
+        motivo = validar_trayecto(trayecto, [origen], [destino], franja(self.b, "ida"), self.escalas_max, self.espera_max)
+        if motivo:
+            return f"Vuelo {numero}: {motivo}"
+        return validar_aerolineas(Opcion(fuente="", ida=trayecto, vuelta=None, precio_billetes=0), self.aerolineas)
+
+    def _varios_destinos(self, opcion: Opcion, tramos: list) -> str | None:
+        vuelos = [opcion.ida] + opcion.siguientes
+        if len(vuelos) != len(tramos):
+            return "faltan vuelos del viaje"
+        for i, (tr, (origen, destino, _)) in enumerate(zip(vuelos, tramos), 1):
+            motivo = self.tramo(tr, origen, destino, i)
+            if motivo:
+                return motivo
+        if any(siguiente.salida <= anterior.llegada for anterior, siguiente in zip(vuelos, vuelos[1:])):
+            return "un vuelo sale antes de que llegue el anterior"
+        return None
+
     def opcion(self, opcion: Opcion) -> str | None:
+        tramos = tramos_viaje(self.b) if self.b.get("modo") == "fechas" else []
+        if tramos:
+            return self._varios_destinos(opcion, tramos)
         motivo = self.sentido(opcion.ida, "ida")
         if motivo:
             return motivo

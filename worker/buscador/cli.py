@@ -49,6 +49,8 @@ def main() -> None:
     p.add_argument("--chollo", help="DESDE:HASTA (modo chollo, cualquier fecha del rango)")
     p.add_argument("--noches", help="MIN-MAX noches (chollo de ida y vuelta)")
     p.add_argument("--solo-ida", action="store_true")
+    p.add_argument("--mas-fechas", default="", help="otras fechas IDA:VUELTA separadas por comas")
+    p.add_argument("--varios", default="", help="varios destinos: SVQ-KRK:AAAA-MM-DD,KRK-ZRH:AAAA-MM-DD,...")
     p.add_argument("--adultos", type=int, default=1)
     p.add_argument("--ninos", type=int, default=0)
     p.add_argument("--bebes", type=int, default=0)
@@ -82,6 +84,15 @@ def main() -> None:
         "modo_precio": "presupuesto" if a.presupuesto else "mas_barato", "presupuesto": a.presupuesto,
         "aplicar_descuentos": True, "info": {},
     }
+    b["fechas_extra"] = [dict(zip(("ida", "vuelta"), p.split(":"))) for p in a.mas_fechas.split(",") if p.strip()]
+    if a.varios:
+        b["tramos_viaje"] = [
+            {"origen": ruta.split("-")[0].upper(), "destino": ruta.split("-")[1].upper(), "fecha": f}
+            for ruta, f in (t.split(":") for t in a.varios.split(","))
+        ]
+        primero = b["tramos_viaje"][0]
+        b.update(ida_vuelta=False, origen=primero["origen"], destino=primero["destino"], fecha_ida=primero["fecha"],
+                 fecha_vuelta=None, nombre="Varios destinos (prueba)")
     if a.chollo:
         b["chollo_desde"], b["chollo_hasta"] = a.chollo.split(":")
         if a.noches:

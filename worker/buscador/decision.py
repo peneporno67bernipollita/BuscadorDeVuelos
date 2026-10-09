@@ -15,6 +15,7 @@ from statistics import median
 
 from . import aeropuertos
 from .modelos import Opcion
+from .viaje import primera_salida
 
 # Días antes de la salida en los que suele estar lo más barato (inicio, fin)
 VENTANA_OPTIMA = {"nacional": (21, 60), "europa": (28, 70), "largo": (50, 135)}
@@ -110,7 +111,7 @@ def decidir(
     modo_fechas = busqueda["modo"] == "fechas"
     dias = None
     if modo_fechas:
-        dias = (date.fromisoformat(str(busqueda["fecha_ida"])) - hoy).days
+        dias = (primera_salida(busqueda, hoy) - hoy).days  # con varias fechas, la más cercana
         contexto["dias"] = dias
 
     if mejor is None:
@@ -257,8 +258,7 @@ REVISION_LEJANO_MIN = 90  # viaje en más de 2 meses
 def minutos_hasta_siguiente_revision(busqueda: dict, hoy: date) -> int:
     """Cuanto más cerca está el viaje, más a menudo se revisa (en un chollo cuenta el inicio del periodo:
     cada revisión mira 8 fechas nuevas, así que revisar a menudo también cubre antes todo el periodo)."""
-    salida = busqueda["fecha_ida"] if busqueda["modo"] == "fechas" else busqueda["chollo_desde"]
-    dias = (date.fromisoformat(str(salida)) - hoy).days
+    dias = (primera_salida(busqueda, hoy) - hoy).days
     if dias <= DIAS_VIAJE_PROXIMO:
         return REVISION_PROXIMO_MIN
     if dias <= 60:

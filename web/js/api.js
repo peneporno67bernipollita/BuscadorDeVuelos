@@ -12,6 +12,7 @@ const ERRORES = [
   [/user already registered/i, "Ese correo ya tiene cuenta. Entra con tu contraseña."],
   [/password should be at least/i, "La contraseña debe tener al menos 6 caracteres."],
   [/rate limit/i, "Demasiados intentos seguidos. Espera unos minutos."],
+  [/fechas_extra|tramos_viaje|busquedas_viaje_valido/i, "Para varias fechas o varios destinos falta actualizar la base de datos: en Supabase → SQL Editor pega todo supabase/instalar.sql y pulsa Run."],
   [/origenes_extra|destinos_extra|busquedas_extras_max/i, "Para usar varios aeropuertos falta actualizar la base de datos: en Supabase → SQL Editor pega todo supabase/instalar.sql y pulsa Run."],
   [/ntfy_pausa|zona_horaria/i, "Para el horario solo Telegram falta actualizar la base de datos: en Supabase → SQL Editor pega todo supabase/instalar.sql y pulsa Run."],
   [/ntfy_tema|alarma_chollos|alarma_prueba/i, "Para la alarma falta actualizar la base de datos: en Supabase → SQL Editor pega todo supabase/instalar.sql y pulsa Run."],
@@ -107,7 +108,7 @@ async function crearReal() {
     /** Mejor opción de la última revisión de cada búsqueda: solo fechas y vuelos (para el panel). */
     async ultimosMejores(ids) {
       const filas = await Promise.all(ids.map(async (id) => comprobar(
-        await sb.from("precios").select("busqueda,revisado,fecha_ida,fecha_vuelta,ida:detalle->ida,vuelta:detalle->vuelta")
+        await sb.from("precios").select("busqueda,revisado,fecha_ida,fecha_vuelta,ida:detalle->ida,vuelta:detalle->vuelta,siguientes:detalle->siguientes")
           .eq("busqueda", id).eq("es_mejor", true).order("revisado", { ascending: false }).limit(1),
       )));
       return filas.flat();

@@ -84,6 +84,9 @@ def comprar_ya(busqueda: dict, opcion: Opcion) -> list[dict]:
             tfs = encode_tfs_payload(segmentos, is_one_way=solo_ida, passengers=pasajeros)
             return f"https://www.google.com/travel/flights/booking?tfs={tfs}&hl=es&gl=ES&curr=EUR"
 
+        if opcion.siguientes:  # varios destinos: un billete por vuelo
+            return [{"texto": f"Comprar el vuelo {i}", "url": url(_segmento_fijado(tr), True)}
+                    for i, tr in enumerate([opcion.ida] + opcion.siguientes, 1)]
         if opcion.vuelta is None:
             return [{"texto": "Comprar ya", "url": url(_segmento_fijado(opcion.ida), True)}]
         if opcion.billetes_separados:
@@ -110,7 +113,10 @@ def compra(busqueda: dict, opcion: Opcion, aerolineas: dict[str, dict]) -> list[
         if codigo in GRUPO_RYANAIR:
             vistos |= GRUPO_RYANAIR
             ryanair_ida, ryanair_vuelta = en_ida & GRUPO_RYANAIR, en_vuelta & GRUPO_RYANAIR
-            if ryanair_ida and ryanair_vuelta:
+            if opcion.siguientes:  # varios destinos: el primer vuelo de Ryanair del viaje
+                tr = next(tr for tr in opcion.trayectos if {t.aerolinea for t in tr.tramos} & GRUPO_RYANAIR)
+                url = _ryanair(busqueda, tr, None)
+            elif ryanair_ida and ryanair_vuelta:
                 url = _ryanair(busqueda, opcion.ida, opcion.vuelta)
             elif ryanair_ida:
                 url = _ryanair(busqueda, opcion.ida, None)

@@ -37,7 +37,7 @@ from fli.search import SearchDates, SearchFlights
 from fli.search._concurrency import TokenBucketRateLimiter
 from fli.search.client import get_client
 
-from .. import filtros
+from .. import filtros, viaje
 from ..tiempo import hoy
 from ..modelos import ErrorExplicado, FuenteBloqueada, Opcion, PrecioCalendario, ResultadoFuente, Tramo, Trayecto
 
@@ -194,7 +194,10 @@ class GoogleFlights:
     def _segmento(self, b: dict, sentido: str, fecha: date, con_horas: bool = True) -> FlightSegment:
         origenes, destinos = filtros.aeropuertos_busqueda(b)
         o, d = (origenes, destinos) if sentido == "ida" else (destinos, origenes)
-        sal_min, sal_max, lle_min, lle_max = filtros.franja(b, sentido) if con_horas else (0, 24, 0, 24)
+        return self._segmento_ruta(o, d, fecha, filtros.franja(b, sentido) if con_horas else (0, 24, 0, 24))
+
+    def _segmento_ruta(self, o: list[str], d: list[str], fecha: date, horas_franja: tuple) -> FlightSegment:
+        sal_min, sal_max, lle_min, lle_max = horas_franja
         horas = TimeRestrictions(
             earliest_departure=sal_min or None,
             latest_departure=sal_max if sal_max < 24 else None,
@@ -263,6 +266,56 @@ class GoogleFlights:
             **self._comunes(b),
         )
         return self._llamar(SearchFlights().search, f) or []
+
+    def _solo_ida_ruta(self, b: dict, origen: str, destino: str, fecha: date, horas_franja: tuple) -> list:
+        f = FlightSearchFilters(
+            trip_type=TripType.ONE_WAY,
+            flight_segments=[self._segmento_ruta([origen], [destino], fecha, horas_franja)],
+            sort_by=SortBy.CHEAPEST,
+            **self._comunes(b),
+        )
+        return self._llamar(SearchFlights().search, f) or []
+
+    def varios_destinos(self, b: dict, validador: filtros.Validador) -> list[Opcion]:
+        """Viaje con varios destinos (Sevilla → Cracovia → Zúrich → Sevilla): cada vuelo es un billete
+        de solo ida y se suman los más baratos que encajan en orden. (La página de resultados de Google
+        no sirve búsquedas de varios destinos juntos.)"""
+        tramos = viaje.tramos_viaje(b)
+        if not tramos or tramos[0][2] < hoy():
+            return []
+        horas = filtros.franja(b, "ida")
+        candidatos: list[list[tuple[float, Trayecto]]] = []
+        for i, (origen, destino, fecha) in enumerate(tramos, 1):
+            validos: list[tuple[float, Trayecto]] = []
+            # Si con tu horario Google no devuelve nada, se repite sin él y lo filtra el robot
+            for franja_busqueda in dict.fromkeys([horas, (0, 24, 0, 24)]):
+                for r in self._solo_ida_ruta(b, origen, destino, fecha, franja_busqueda):
+                    if r.price is None or r.self_transfer:
+                        continue
+                    tr = _a_trayecto(r)
+                    if validador.tramo(tr, origen, destino, i) is None:
+                        validos.append((float(r.price), tr))
+                if validos:
+                    break
+            if not validos:
+                return []
+            candidatos.append(sorted(validos, key=lambda x: x[0]))
+        opciones: list[Opcion] = []
+        vistas: set = set()
+        for inicio in candidatos[0][:3]:  # las 3 primeras idas más baratas, cada una con lo más barato que encaje
+            elegidos = [inicio]
+            for lista in candidatos[1:]:
+                siguiente = next((c for c in lista if c[1].salida > elegidos[-1][1].llegada), None)
+                if siguiente is None:
+                    break
+                elegidos.append(siguiente)
+            clave = tuple(id(tr) for _, tr in elegidos)
+            if len(elegidos) == len(candidatos) and clave not in vistas:
+                vistas.add(clave)
+                trayectos = [tr for _, tr in elegidos]
+                opciones.append(Opcion(fuente=self.nombre, ida=trayectos[0], vuelta=None, siguientes=trayectos[1:],
+                                       precio_billetes=sum(p for p, _ in elegidos), billetes_separados=True))
+        return opciones
 
     def _ida_y_vuelta(self, b: dict, fecha_ida: date, fecha_vuelta: date, con_horas: bool = True, top_n: int = 2) -> list[Opcion]:
         f = FlightSearchFilters(
@@ -409,22 +462,30 @@ class GoogleFlights:
         self.nueva_sesion_privada()
         primera_respuesta = len(self.respuestas)
         res = ResultadoFuente()
-        if b["modo"] == "fechas":
-            fi = date.fromisoformat(str(b["fecha_ida"]))
-            fv = date.fromisoformat(str(b["fecha_vuelta"])) if b.get("ida_vuelta") else None
-            noches = (fv - fi).days if fv else None
+        varios = viaje.es_varios_destinos(b)
+        pares: list[tuple[date, date | None]] = []
+        if varios:
+            res.opciones += self.varios_destinos(b, validador)
+        elif b["modo"] == "fechas":
             flex = b.get("flex_dias") or 0
-            pares = [(fi, fv)]
-            # Con margen de días se mira el calendario (una página por día) para elegir las más baratas
-            if flex and noches != 0:
+            base = viaje.pares_fechas(b)  # las fechas principales y las alternativas
+            for fi, fv in base:
+                noches = (fv - fi).days if fv else None
+                if not flex or noches == 0:
+                    pares.append((fi, fv))
+                    continue
+                # Con margen de días se mira el calendario (una página por día) para elegir las más baratas
+                cal: list[PrecioCalendario] = []
                 try:
-                    res.calendario = self.calendario(b, fi - timedelta(days=flex), fi + timedelta(days=flex), noches)
+                    cal = self.calendario(b, fi - timedelta(days=flex), fi + timedelta(days=flex), noches)
                 except FuenteBloqueada:
                     raise
                 except Exception as e:  # sin calendario se buscan las fechas pedidas
                     log.warning("Calendario no disponible: %s", type(e).__name__)
-                mas_baratas = sorted(res.calendario, key=lambda c: c.precio)
-                pares = [(c.fecha_ida, c.fecha_vuelta) for c in mas_baratas[:2]] or pares
+                res.calendario += cal
+                mas_baratas = sorted(cal, key=lambda c: c.precio)[: 2 if len(base) == 1 else 1]
+                pares += [(c.fecha_ida, c.fecha_vuelta) for c in mas_baratas] or [(fi, fv)]
+            pares = list(dict.fromkeys(pares))
         else:
             fallidas = 0
             muestras = self._muestras_chollo(b)
@@ -454,7 +515,7 @@ class GoogleFlights:
         recientes = self.respuestas[primera_respuesta:]
         if any(r.startswith("bloqueo") for r in recientes):
             raise FuenteBloqueada("Google Flights ha respondido con su página de tráfico inusual")
-        if not res.opciones and pares and not res.error:
+        if not res.opciones and (pares or varios) and not res.error:
             tipos = sorted(set(recientes)) or ["ninguna respuesta"]
             res.error = "Google no devolvió vuelos. Respuestas: " + " | ".join(tipos)
         return res
