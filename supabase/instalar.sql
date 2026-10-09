@@ -500,6 +500,26 @@ drop trigger if exists proteger_perfil on public.perfiles;
 create trigger proteger_perfil before update on public.perfiles
   for each row execute function public.proteger_perfil();
 
+-- =====================================================================
+-- Actualización v8: aviso por Telegram cada vez que alguien entra en tu cuenta
+-- =====================================================================
+-- Supabase apunta cada acceso (hora, IP y tipo) en auth.audit_log_entries, una tabla que la API
+-- no deja leer. Esta función le pasa al robot solo esos tres datos (ni correos ni identificadores).
+-- Se omiten las renovaciones automáticas de la sesión (token_refreshed / token_revoked): no son entrar.
+create or replace function public.accesos_desde(desde timestamptz)
+returns table (created_at timestamptz, ip_address text, accion text)
+language sql stable security definer set search_path = public, auth as $$
+  select e.created_at, e.ip_address::text, e.payload ->> 'action'
+  from auth.audit_log_entries e
+  where e.created_at > desde
+    and coalesce(e.payload ->> 'action', '') not in ('token_refreshed', 'token_revoked')
+  order by e.created_at
+  limit 200;
+$$;
+-- Solo el robot (clave secreta) puede usarla: ni sin sesión ni con tu sesión de la web
+revoke execute on function public.accesos_desde(timestamptz) from public, anon, authenticated;
+grant execute on function public.accesos_desde(timestamptz) to service_role;
+
 -- Que la API de Supabase vea al momento las columnas nuevas
 notify pgrst, 'reload schema';
 
@@ -586,7 +606,8 @@ insert into public.aerolineas (codigo, nombre, permitida, criterio, web_oficial,
   ('H2', 'SKY Airline', true, 'AirlineRatings 2026: top 25 low cost (nº25)', 'https://www.skyairline.com', 50, 80, 80, 80, 'tramo', null, 'La tarifa básica solo incluye un bolso pequeño; maletas = máximo publicado (estimación).')
 on conflict (codigo) do nothing;
 
--- Comprobación final (debe salir: 8 tablas, 77 aerolíneas, 3 webs, versión 2 = 1, versión 3 = 2, versión 5 = 3, versión 6 = 5, versión 7 = 6)
+-- Comprobación final (debe salir: 8 tablas, 77 aerolíneas, 3 webs, versión 2 = 1, versión 3 = 2, versión 5 = 3, versión 6 = 5, versión 7 = 6, versión 8 = 1;
+-- accesos registrados por Supabase: más de 0 si has usado la web este mes)
 select 'Tablas creadas' as comprobacion, count(*) as total from information_schema.tables
   where table_schema = 'public' and table_name in
   ('perfiles','busquedas','precios','avisos','aerolineas','estado_fuentes','ejecuciones','ajustes')
@@ -604,4 +625,9 @@ union all select 'Versión 6 instalada (horario solo Telegram)', count(*) from i
   and column_name in ('ntfy_pausa', 'ntfy_pausa_desde', 'ntfy_pausa_hasta', 'ntfy_pausa_dias', 'zona_horaria')
 union all select 'Versión 7 instalada (seguridad reforzada)', (select count(*) from pg_constraint where conname in
   ('aerolineas_web_https', 'aerolineas_textos_largo', 'busquedas_nombre_largo', 'perfiles_campos_validos',
-   'estado_fuentes_limites')) + (select count(*) from pg_trigger where tgname = 'proteger_perfil');
+   'estado_fuentes_limites')) + (select count(*) from pg_trigger where tgname = 'proteger_perfil')
+union all select 'Versión 8 instalada (avisos de acceso)', count(*) from pg_proc
+  where proname = 'accesos_desde' and pronamespace = 'public'::regnamespace
+  and not has_function_privilege('anon', oid, 'execute') and not has_function_privilege('authenticated', oid, 'execute')
+union all select 'Accesos registrados por Supabase (últimos 30 días)', count(*) from auth.audit_log_entries
+  where created_at > now() - interval '30 days';

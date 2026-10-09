@@ -500,5 +500,25 @@ drop trigger if exists proteger_perfil on public.perfiles;
 create trigger proteger_perfil before update on public.perfiles
   for each row execute function public.proteger_perfil();
 
+-- =====================================================================
+-- Actualización v8: aviso por Telegram cada vez que alguien entra en tu cuenta
+-- =====================================================================
+-- Supabase apunta cada acceso (hora, IP y tipo) en auth.audit_log_entries, una tabla que la API
+-- no deja leer. Esta función le pasa al robot solo esos tres datos (ni correos ni identificadores).
+-- Se omiten las renovaciones automáticas de la sesión (token_refreshed / token_revoked): no son entrar.
+create or replace function public.accesos_desde(desde timestamptz)
+returns table (created_at timestamptz, ip_address text, accion text)
+language sql stable security definer set search_path = public, auth as $$
+  select e.created_at, e.ip_address::text, e.payload ->> 'action'
+  from auth.audit_log_entries e
+  where e.created_at > desde
+    and coalesce(e.payload ->> 'action', '') not in ('token_refreshed', 'token_revoked')
+  order by e.created_at
+  limit 200;
+$$;
+-- Solo el robot (clave secreta) puede usarla: ni sin sesión ni con tu sesión de la web
+revoke execute on function public.accesos_desde(timestamptz) from public, anon, authenticated;
+grant execute on function public.accesos_desde(timestamptz) to service_role;
+
 -- Que la API de Supabase vea al momento las columnas nuevas
 notify pgrst, 'reload schema';

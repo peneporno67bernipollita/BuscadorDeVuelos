@@ -9,7 +9,8 @@ from buscador import run
 
 @pytest.fixture(autouse=True)
 def limites_de_telegram_limpios():
-    for limite in (run.LIMITE_DESCONOCIDO, run.LIMITE_RESPUESTAS_DESCONOCIDOS, run.LIMITE_VINCULADO):
+    for limite in (run.LIMITE_DESCONOCIDO, run.LIMITE_RESPUESTAS_DESCONOCIDOS, run.LIMITE_VINCULADO,
+                   run.LIMITE_AVISOS_ACCESO):
         limite.marcas.clear()
 
 
@@ -17,6 +18,15 @@ class BaseDeDatosFalsa:
     def __init__(self, tablas):
         self.tablas = tablas
         self.borrados = []
+
+    def rpc(self, funcion, **argumentos):
+        """Imita public.accesos_desde (supabase/esquema.sql, v8) sobre la tabla «auditoria»."""
+        if funcion != "accesos_desde" or "auditoria" not in self.tablas:
+            raise RuntimeError('Supabase POST /rest/v1/rpc/x: 404 {"code":"PGRST202"}')
+        desde = datetime.fromisoformat(argumentos["desde"])
+        return [dict(e) for e in sorted(self.tablas["auditoria"], key=lambda e: e["created_at"])
+                if datetime.fromisoformat(e["created_at"]) > desde
+                and e["accion"] not in ("token_refreshed", "token_revoked")][:200]
 
     @staticmethod
     def _cumple(fila, filtros):
@@ -279,3 +289,134 @@ def test_enlaces_de_telegram_seguros():
     assert es_https("https://www.iberia.com") and not es_https("javascript:alert(1)") and not es_https("http://x.com")
     assert not es_https('https://x.com/"><b>')
     assert _href('https://x.com/?a="b"&c=<d>') == "https://x.com/?a=&quot;b&quot;&amp;c=&lt;d&gt;"
+
+
+T0 = datetime(2026, 10, 9, 11, 0, tzinfo=timezone.utc)  # 13:00 en Madrid
+
+
+def _acceso(minutos, accion, ip):
+    return {"created_at": (T0 + timedelta(minutes=minutos)).isoformat(), "accion": accion, "ip_address": ip}
+
+
+def _registro(caplog):
+    return " ".join(r.getMessage() for r in caplog.records)
+
+
+def test_avisos_de_acceso_por_telegram(caplog):
+    caplog.set_level("INFO", logger="buscador")
+    db = BaseDeDatosFalsa({
+        "perfiles": [{"id": "u1", "telegram_chat_id": "99"}],
+        "ajustes": [],
+        "auditoria": [_acceso(-60 * 24 * 10, "login", "198.51.100.1"), _acceso(-60 * 24 * 40, "login", "192.0.2.200")],
+    })
+    tg = TelegramFalso([])
+    perfiles = {p["id"]: p for p in db.leer("perfiles")}
+
+    # Primera vez: no avisa de lo anterior; las IPs de los últimos 30 días cuentan como conocidas
+    assert run.avisar_accesos(db, tg, perfiles, ahora=T0) == 0
+    assert len(tg.enviados) == 1 and "activados" in tg.enviados[0][1] and "1 inicio de sesión desde 1 IP " in tg.enviados[0][1]
+    assert db.leer("ajustes", clave="eq.accesos_ips")[0]["valor"] == ["198.51.100.1"]
+    assert db.leer("ajustes", clave="eq.accesos_desde")[0]["valor"] == T0.isoformat()
+
+    # Entras tú desde tu IP de siempre y alguien desde otra; las renovaciones de sesión y salir no avisan
+    tg.enviados.clear()
+    db.tablas["auditoria"] += [
+        _acceso(1, "token_refreshed", "198.51.100.1"), _acceso(1, "token_revoked", "198.51.100.1"),
+        _acceso(2, "login", "198.51.100.1"), _acceso(3, "login", "203.0.113.7"), _acceso(4, "logout", "203.0.113.7"),
+    ]
+    assert run.avisar_accesos(db, tg, perfiles) == 2
+    (chat1, tuyo), (chat2, otro) = tg.enviados
+    assert chat1 == chat2 == "99"
+    assert "Inicio de sesión" in tuyo and "13:02:00 (hora de Madrid)" in tuyo and "ya habías entrado" in tuyo
+    assert "IP 203.0.113.7" in otro and "nueva" in otro and "Cambiar contraseña" in otro
+    assert db.leer("ajustes", clave="eq.accesos_desde")[0]["valor"] == _acceso(4, "", "")["created_at"]  # pasa el logout
+    assert db.leer("ajustes", clave="eq.accesos_ips")[0]["valor"] == ["203.0.113.7", "198.51.100.1"]
+
+    # Nada nuevo: nada que enviar
+    tg.enviados.clear()
+    assert run.avisar_accesos(db, tg, perfiles) == 0 and tg.enviados == []
+
+    # El registro de GitHub es público: solo recuentos, ni IPs ni chats
+    registro = _registro(caplog)
+    assert "2 aviso(s)" in registro and "1 desde IP nueva" in registro
+    assert not any(dato in registro for dato in ("198.51.100", "203.0.113", "192.0.2", "99 ", "13:0"))
+
+
+def test_avisos_de_acceso_agrupados_y_con_limite_por_hora():
+    db = BaseDeDatosFalsa({
+        "perfiles": [{"id": "u1", "telegram_chat_id": "99"}],
+        "ajustes": [{"clave": "accesos_desde", "valor": T0.isoformat()}, {"clave": "accesos_ips", "valor": ["198.51.100.1"]}],
+        "auditoria": [_acceso(1 + i * 0.1, "user_recovery_requested", f"192.0.2.{i}") for i in range(11)]
+                     + [_acceso(3, "login", "192.0.2.10")],
+    })
+    tg = TelegramFalso([])
+    perfiles = {p["id"]: p for p in db.leer("perfiles")}
+
+    # Muchos seguidos: un solo mensaje con la lista (los 10 últimos) y el resumen
+    assert run.avisar_accesos(db, tg, perfiles) == 1
+    texto = tg.enviados[0][1]
+    assert "12 accesos seguidos" in texto and "(y 2 anteriores)" in texto and "12 desde IP nueva" in texto
+    assert texto.count("\n• ") == 10 and "Petición para recuperar la contraseña" in texto
+    # Pedir recuperar la contraseña no hace «conocida» la IP; entrar, sí
+    assert db.leer("ajustes", clave="eq.accesos_ips")[0]["valor"] == ["192.0.2.10", "198.51.100.1"]
+
+    # Máximo de mensajes por hora: lo que no cabe espera (la marca no avanza) y luego llega agrupado
+    marca = lambda: db.leer("ajustes", clave="eq.accesos_desde")[0]["valor"]  # noqa: E731
+    for _ in range(4):
+        assert run.LIMITE_AVISOS_ACCESO.permitir("accesos")  # con el mensaje anterior, 5 de 6 esta hora
+    db.tablas["auditoria"] += [_acceso(10 + i, "login", "198.51.100.1") for i in range(3)]
+    tg.enviados.clear()
+    assert run.avisar_accesos(db, tg, perfiles) == 1  # el sexto mensaje de la hora: solo el primero de los 3
+    assert run.avisar_accesos(db, tg, perfiles) == 0  # ya no caben más esta hora
+    assert len(tg.enviados) == 1 and marca() == _acceso(10, "", "")["created_at"]
+    db.tablas["auditoria"] += [_acceso(20 + i, "login", "198.51.100.1") for i in range(2)]  # siguen entrando
+    run.LIMITE_AVISOS_ACCESO.marcas.clear()  # pasa la hora
+    assert run.avisar_accesos(db, tg, perfiles) == 1 and "4 accesos seguidos" in tg.enviados[-1][1]
+    assert marca() == _acceso(21, "", "")["created_at"]
+
+
+def test_avisos_de_acceso_no_se_pierden_si_telegram_falla_o_no_hay_chat():
+    db = BaseDeDatosFalsa({
+        "perfiles": [{"id": "u1", "telegram_chat_id": None}],
+        "ajustes": [{"clave": "accesos_desde", "valor": T0.isoformat()}, {"clave": "accesos_ips", "valor": []}],
+        "auditoria": [_acceso(1, "login", "203.0.113.7")],
+    })
+    tg = TelegramFalso([])
+    # Sin chat vinculado: espera (si alguien desvincula Telegram desde la web, al volver a vincularlo te enteras)
+    assert run.avisar_accesos(db, tg, {p["id"]: p for p in db.leer("perfiles")}) == 0 and tg.enviados == []
+    assert db.leer("ajustes", clave="eq.accesos_desde")[0]["valor"] == T0.isoformat()
+    # Telegram no responde: tampoco avanza
+    db.actualizar("perfiles", {"id": "eq.u1"}, {"telegram_chat_id": "99"})
+    perfiles = {p["id"]: p for p in db.leer("perfiles")}
+    tg.enviar = lambda chat, texto: False
+    assert run.avisar_accesos(db, tg, perfiles) == 0
+    assert db.leer("ajustes", clave="eq.accesos_desde")[0]["valor"] == T0.isoformat()
+    # Vuelve Telegram: llega el aviso pendiente
+    tg = TelegramFalso([])
+    assert run.avisar_accesos(db, tg, perfiles) == 1 and "203.0.113.7" in tg.enviados[0][1]
+
+
+def test_sin_la_version_8_del_sql_telegram_sigue_atendiendo(caplog):
+    caplog.set_level("INFO", logger="buscador")
+    db = BaseDeDatosFalsa({"perfiles": [{"id": "u1", "telegram_chat_id": "99"}], "ajustes": []})  # sin accesos_desde
+    atencion = run.Atencion("https://x.supabase.co", "clave", None, None, None)
+    tg = TelegramFalso([_mensaje(1, 99, "/ayuda")])
+    atencion.vuelta(db, tg, float("-inf"))
+    atencion.vuelta(db, tg, float("-inf"))
+    assert any("/estado" in t for _, t in tg.enviados)  # contesta igual
+    avisos = [r.getMessage() for r in caplog.records if "Avisos de acceso" in r.getMessage()]
+    assert len(avisos) == 1 and "versión 8" in avisos[0]  # se avisa una vez, no cada minuto
+    # Instalada la versión 8, la siguiente vuelta del minuto activa los avisos
+    db.tablas["auditoria"] = []
+    atencion.vuelta(db, TelegramFalso([]), float("-inf"))
+    assert db.leer("ajustes", clave="eq.accesos_desde") and atencion.fallo_accesos is None
+
+
+def test_mensaje_de_acceso_con_hora_de_madrid_y_html_seguro():
+    from buscador.avisos import mensaje_accesos
+
+    texto = mensaje_accesos([{"created_at": "2026-12-01T08:05:09.12345+00:00", "accion": "user_updated_password",
+                              "ip_address": "<b>", "nueva": True}])
+    assert "Contraseña cambiada" in texto and "09:05:09 (hora de Madrid)" in texto  # en invierno, UTC+1
+    assert "&lt;b&gt;" in texto and "<b>nueva</b>" in texto
+    assert "evento sin tipo" in mensaje_accesos([{"created_at": "2026-12-01T08:05:09+00:00", "accion": None, "ip_address": ""}])

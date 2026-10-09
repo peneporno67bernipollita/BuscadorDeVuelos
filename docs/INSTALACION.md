@@ -25,9 +25,12 @@ Todo es gratis. Tardarás unos 30 minutos. Necesitas:
    Debe terminar con *Success*. Se puede volver a ejecutar sin problema; **hazlo tras cada actualización**
    (la versión 2 añade el tiempo real de la web, la señal de vida del robot y el mensaje de prueba de Telegram;
    la versión 3, varios aeropuertos de salida y de llegada por búsqueda; la versión 5, la alarma en el móvil;
-   la versión 6, el horario «solo Telegram» de la alarma; la versión 7, seguridad reforzada).
+   la versión 6, el horario «solo Telegram» de la alarma; la versión 7, seguridad reforzada; la versión 8, un aviso
+   por Telegram cada vez que alguien entra en tu cuenta).
    La tabla final debe decir "Versión 2 instalada" = 1, "Versión 3 instalada" = 2, "Versión 5 instalada" = 3,
-   "Versión 6 instalada" = 5 y "Versión 7 instalada" = 6.
+   "Versión 6 instalada" = 5, "Versión 7 instalada" = 6 y "Versión 8 instalada" = 1.
+   "Accesos registrados por Supabase" debe ser más de 0 si has usado la web este mes; si sale 0, revisa en
+   **Authentication → Audit Logs** que esté activado **Write audit logs to the database** (sin eso no hay avisos de acceso).
 5. Apunta estos tres datos:
    - **Project URL** (en **Project Settings → Data API**): algo como `https://abcdxyz.supabase.co`.
    - **Publishable key** (en **Project Settings → API Keys**): empieza por `sb_publishable_`. Es pública y va en la web.
@@ -120,6 +123,7 @@ una en marcha y, si la cadena se hubiera cortado, la vuelve a arrancar.
 
 - En tu web, el indicador de la barra lateral dice **Robot en directo** y la pantalla **Robot** muestra su actividad.
 - En Telegram te ha llegado "✅ ¡Listo!" y, si lo pediste, el mensaje de prueba.
+- Con la versión 8 instalada, en el primer minuto del robot te llega "🔐 Avisos de acceso activados".
 - Crea una búsqueda: en uno o dos minutos verás el primer precio. Ábrela con **En directo**: la gráfica, las
   estadísticas y la lista de cambios de precio se actualizan solas en cuanto el robot encuentra un precio distinto.
 
@@ -144,6 +148,12 @@ una en marcha y, si la cadena se hubiera cortado, la vuelve a arrancar.
   corregirlo en su GitHub antes de publicar versión; en `worker/requirements.txt` cambia el commit fijado por el más
   reciente de <https://github.com/punitarani/fli/commits/main>. Desde agosto de 2026 cada día del calendario de precios
   cuesta una página de Google, por eso el modo chollo mira 8 fechas por ronda y las va rotando.
+- **Avisos de acceso**: cada vez que alguien entra en tu cuenta de la web (o pide recuperar la contraseña, la cambia…)
+  te llega un Telegram con la hora, la IP y si la IP es nueva (no estaba entre tus últimos 20 inicios de sesión; con
+  datos móviles la IP cambia a menudo, así que «nueva» no siempre es un intruso). Si no has sido tú:
+  **Perfil → Cambiar contraseña**, que cierra todas las demás sesiones. Supabase solo apunta los accesos que salen
+  bien (no las contraseñas equivocadas). Como mucho llegan 6 mensajes por hora; si hay muchos seguidos, van juntos.
+  El registro público de GitHub solo muestra cuántos avisos se enviaron, nunca las IPs.
 - **Aerolíneas**: revisa y ajusta los precios de maletas en la pantalla **Aerolíneas** si al comprar ves que son otros.
 - **Skyscanner**: está desactivada porque bloquea a los robots. Puedes activarla en **Robot** para reintentar; si bloquea,
   el robot la deja descansar sola.

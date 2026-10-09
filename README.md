@@ -13,6 +13,7 @@ Tú compras en la web oficial de la aerolínea.
   [investigación](docs/INVESTIGACION.md)).
 - **Seguridad**: solo aerolíneas seguras (lista blanca estricta, editable) y solo enlaces a webs oficiales.
 - **Privacidad**: cada búsqueda en una sesión privada nueva, sin cookies.
+- **Avisos de acceso**: un Telegram cada vez que alguien entra en tu cuenta de la web (hora, IP y si la IP es nueva).
 - **En directo**: el robot busca sin parar y la web muestra al momento cada revisión (suba, baje o siga igual), con
   gráfica tipo bolsa, estadísticas y comparación con tu objetivo.
 - **Comprar ya**: un botón (y un enlace en Telegram) que abre Google Flights con esos vuelos exactos ya elegidos.

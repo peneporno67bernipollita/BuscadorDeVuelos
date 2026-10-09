@@ -328,3 +328,78 @@ def codigo_en_mensaje(texto: str) -> str | None:
         return None
     candidato = partes[-1].upper()
     return candidato if 4 <= len(candidato) <= 12 and candidato.isalnum() else None
+
+
+# Avisos de acceso a la cuenta de la web (lo que Supabase apunta en auth.audit_log_entries)
+ACCIONES_ACCESO = {
+    "login": "Inicio de sesión",
+    "user_signedup": "Cuenta nueva registrada",
+    "user_repeated_signup": "Intento de registro con tu correo",
+    "user_recovery_requested": "Petición para recuperar la contraseña",
+    "user_updated_password": "Contraseña cambiada",
+    "user_modified": "Datos de la cuenta cambiados",
+    "user_deleted": "Cuenta borrada",
+    "user_confirmation_requested": "Petición de confirmación del correo",
+    "user_reauthenticate_requested": "Petición de reautenticación",
+    "invite_accepted": "Invitación aceptada",
+}
+NO_HAS_SIDO_TU = "¿No has sido tú? Cambia ya la contraseña (Perfil → Cambiar contraseña): eso cierra todas las demás sesiones."
+
+
+def _momento(valor: str) -> datetime:
+    return datetime.fromisoformat(str(valor).replace("Z", "+00:00")).astimezone(ZONA)
+
+
+def _accion(evento: dict) -> str:
+    accion = evento.get("accion") or "evento sin tipo"
+    return _e(ACCIONES_ACCESO.get(accion, accion))
+
+
+def _ip(evento: dict) -> str:
+    ip = evento.get("ip_address")
+    return (f"IP {_e(ip)}" + (" 🆕" if evento.get("nueva") else "")) if ip else "IP desconocida"
+
+
+def mensaje_accesos(eventos: list[dict], en_lista: int = 10) -> str:
+    """Aviso de acceso. Cada evento: created_at, ip_address, accion y nueva (IP que no estaba entre tus últimos
+    inicios de sesión). Uno solo va con todo detalle; varios seguidos, en una lista."""
+    if len(eventos) == 1:
+        e = eventos[0]
+        m = _momento(e["created_at"])
+        if not e.get("ip_address"):
+            ip = "🌐 IP desconocida"
+        elif e.get("nueva"):
+            ip = f"🌐 IP {_e(e['ip_address'])} · 🆕 <b>nueva</b>: no estaba entre tus últimos inicios de sesión"
+        else:
+            ip = f"🌐 IP {_e(e['ip_address'])} · ya habías entrado desde ella"
+        return "\n".join([
+            f"🔐 <b>{_accion(e)}</b> en tu cuenta de la web",
+            f"🕒 {_fecha(m)} · {m:%H:%M:%S} (hora de Madrid)", ip, "", NO_HAS_SIDO_TU,
+        ])
+    primero, ultimo = _momento(eventos[0]["created_at"]), _momento(eventos[-1]["created_at"])
+    nuevas = sum(1 for e in eventos if e.get("nueva"))
+    lineas = [
+        f"🔐 <b>{len(eventos)} accesos seguidos a tu cuenta de la web</b>",
+        f"🕒 De {_fecha(primero)} {primero:%H:%M} a {_fecha(ultimo)} {ultimo:%H:%M} (hora de Madrid)"
+        + (f" · {nuevas} desde IP nueva 🆕" if nuevas else ""),
+        "",
+    ]
+    if len(eventos) > en_lista:
+        lineas.append(f"(y {len(eventos) - en_lista} anteriores)")
+    for e in eventos[-en_lista:]:
+        m = _momento(e["created_at"])
+        lineas.append(f"• {_fecha(m)} {m:%H:%M} · {_accion(e)} · {_ip(e)}")
+    if nuevas:
+        lineas += ["", "🆕 = IP nueva: no estaba entre tus últimos inicios de sesión"]
+    lineas += ["", NO_HAS_SIDO_TU]
+    return unir_sin_pasarse(lineas)
+
+
+def mensaje_accesos_activados(inicios: int, ips: int) -> str:
+    return (
+        "🔐 <b>Avisos de acceso activados</b>\n"
+        "Desde ahora te escribo aquí cada vez que alguien entre en tu cuenta de la web: la hora, la IP "
+        "y si la IP es nueva.\n"
+        f"En los últimos 30 días hubo {inicios} inicio{'s' if inicios != 1 else ''} de sesión "
+        f"desde {ips} IP{'s' if ips != 1 else ''} distinta{'s' if ips != 1 else ''}."
+    )

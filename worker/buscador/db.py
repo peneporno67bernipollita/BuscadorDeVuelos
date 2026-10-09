@@ -41,6 +41,10 @@ class Supabase:
         cabeceras = {"Prefer": "resolution=merge-duplicates,return=minimal"}
         self._revisar(self.http.post(f"{self.base}/{tabla}", json=filas, headers=cabeceras))
 
+    def rpc(self, funcion: str, **argumentos) -> list[dict]:
+        """Llama a una función de la base de datos (p. ej. accesos_desde, que solo permite la clave secreta)."""
+        return self._revisar(self.http.post(f"{self.base}/rpc/{funcion}", json=argumentos)).json()
+
     def borrar(self, tabla: str, filtros: dict) -> None:
         """Borra las filas que cumplen los filtros (nunca sin filtros)."""
         if not filtros:

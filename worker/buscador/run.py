@@ -27,7 +27,7 @@ from datetime import date, datetime, timedelta, timezone
 from . import enlaces
 from .avisos import (
     AYUDA, MENSAJE_PRUEBA, NOTA_PAUSA, TIPOS_ALARMA, Telegram, alarma, alarma_en_pausa, codigo_en_mensaje, eur,
-    mensaje_aviso, mensaje_estado, texto_alarma,
+    mensaje_accesos, mensaje_accesos_activados, mensaje_aviso, mensaje_estado, texto_alarma,
 )
 from .db import Supabase
 from .decision import decidir, minutos_hasta_siguiente_revision
@@ -234,22 +234,108 @@ def atender_telegram(db: Supabase, tg: Telegram, perfiles: dict[str, dict], url_
     return vinculados
 
 
+# ----------------------------------------------------------------------------------------
+# Avisos de acceso a la cuenta de la web
+# ----------------------------------------------------------------------------------------
+ACCESOS_IGNORADOS = {"token_refreshed", "token_revoked", "logout"}  # renovar la sesión o salir no es entrar
+ACCESOS_AGRUPAR_DESDE = 4  # 4 o más seguidos llegan en un solo mensaje
+IPS_RECORDADAS = 20
+# Como mucho 6 mensajes por hora: lo que no cabe (o no se pudo enviar) espera y llega agrupado después
+LIMITE_AVISOS_ACCESO = Limitador(6, 3600)
+
+
+def _recordar_ips(conocidas: list[str], eventos: list[dict]) -> list[str]:
+    """IPs desde las que se ha entrado, la más reciente primero. Solo cuentan los inicios de sesión: pedir
+    recuperar la contraseña desde una IP no la convierte en «conocida» para cuando entre desde ella."""
+    for e in eventos:
+        if e.get("accion") == "login" and e.get("ip_address"):
+            conocidas = [e["ip_address"]] + [ip for ip in conocidas if ip != e["ip_address"]]
+    return conocidas[:IPS_RECORDADAS]
+
+
+def avisar_accesos(db: Supabase, tg: Telegram, perfiles: dict[str, dict], ahora: datetime | None = None) -> int:
+    """Avisa por Telegram de cada acceso a la cuenta de la web (hora, IP, tipo y si la IP es nueva).
+    Devuelve los mensajes enviados. Lo que no se envía (límite por hora, Telegram caído o chat sin vincular)
+    no se pierde: la marca no avanza y llega en la siguiente vuelta que se pueda."""
+    ahora = ahora or datetime.now(timezone.utc)
+    chat = next((p["telegram_chat_id"] for p in perfiles.values() if p.get("telegram_chat_id")), None)
+    desde = _ajuste(db, "accesos_desde")
+    if desde is None:
+        # Primera vez: lo anterior no se avisa, y las IPs de los últimos 30 días cuentan como conocidas
+        previos = db.rpc("accesos_desde", desde=(ahora - timedelta(days=30)).isoformat())
+        ips = _recordar_ips([], previos)
+        db.guardar("ajustes", {"clave": "accesos_ips", "valor": ips})
+        db.guardar("ajustes", {"clave": "accesos_desde", "valor": ahora.isoformat()})
+        if chat:
+            tg.enviar(chat, mensaje_accesos_activados(sum(e.get("accion") == "login" for e in previos), len(ips)))
+        log.info("Avisos de acceso activados")
+        return 0
+    if not chat:
+        return 0
+    eventos = db.rpc("accesos_desde", desde=desde)
+    if not eventos:
+        return 0
+
+    conocidas = list(_ajuste(db, "accesos_ips") or [])
+    vistas = conocidas
+    for e in eventos:
+        e["nueva"] = bool(e.get("ip_address")) and e["ip_address"] not in vistas
+        vistas = _recordar_ips(vistas, [e])
+    relevantes = [i for i, e in enumerate(eventos) if e.get("accion") not in ACCESOS_IGNORADOS]
+    grupos = [relevantes] if len(relevantes) >= ACCESOS_AGRUPAR_DESDE else [[i] for i in relevantes]
+
+    # Cada mensaje cubre sus eventos y los ignorados que vengan detrás (para que la marca también los pase)
+    hecho = -1 if grupos else len(eventos) - 1
+    enviados = 0
+    for n, grupo in enumerate(grupos):
+        if not LIMITE_AVISOS_ACCESO.permitir("accesos") or not tg.enviar(chat, mensaje_accesos([eventos[i] for i in grupo])):
+            break
+        hecho = grupos[n + 1][0] - 1 if n + 1 < len(grupos) else len(eventos) - 1
+        enviados += 1
+    if hecho >= 0:
+        db.guardar("ajustes", {"clave": "accesos_ips", "valor": _recordar_ips(conocidas, eventos[: hecho + 1])})
+        db.guardar("ajustes", {"clave": "accesos_desde", "valor": eventos[hecho]["created_at"]})
+    if enviados:
+        # Solo recuentos: el registro de GitHub es público (nada de IPs, horas exactas ni chats)
+        avisados = [eventos[i] for i in relevantes if i <= hecho]
+        log.info("Accesos a la cuenta: %d aviso(s) por Telegram (%d acceso(s), %d desde IP nueva)%s",
+                 enviados, len(avisados), sum(e["nueva"] for e in avisados),
+                 f"; {len(relevantes) - len(avisados)} pendiente(s) para más tarde" if len(avisados) < len(relevantes) else "")
+    return enviados
+
+
 class Atencion(threading.Thread):
     """En modo continuo, en paralelo a las búsquedas: contesta a Telegram en cuanto le escribes, atiende las
-    pruebas pedidas desde la web en unos segundos y mantiene al día la señal de vida (aunque una búsqueda
-    tarde varios minutos). Usa sus propias conexiones: no comparte nada con el hilo de las búsquedas."""
+    pruebas pedidas desde la web en unos segundos, mantiene al día la señal de vida (aunque una búsqueda
+    tarde varios minutos) y cada minuto te avisa si alguien ha entrado en tu cuenta de la web.
+    Usa sus propias conexiones: no comparte nada con el hilo de las búsquedas."""
 
     def __init__(self, url: str, clave: str, token: str | None, url_web: str | None, hasta: datetime | None):
         super().__init__(name="atencion", daemon=True)
         self.url, self.clave, self.token, self.url_web, self.hasta = url, clave, token, url_web, hasta
         self.parar = threading.Event()
+        self.fallo_accesos: str | None = None
+
+    def accesos(self, db: Supabase, tg: Telegram, perfiles: dict[str, dict]) -> None:
+        """Los avisos de acceso nunca frenan a Telegram (p. ej. si aún no está instalada la versión 8 del SQL)."""
+        try:
+            avisar_accesos(db, tg, perfiles)
+            self.fallo_accesos = None
+        except Exception as e:
+            if self.fallo_accesos != type(e).__name__:  # se escribe una vez, no cada minuto
+                pista = " · falta ejecutar supabase/instalar.sql (versión 8)" if "PGRST202" in str(e) else ""
+                log.warning("Avisos de acceso: no se pudieron revisar: %s: %s%s", type(e).__name__, _sin_urls(e), pista)
+            self.fallo_accesos = type(e).__name__
 
     def vuelta(self, db: Supabase, tg: Telegram | None, ultimo_latido: float) -> float:
-        if time.monotonic() - ultimo_latido >= LATIDO_CADA_S:
+        cada_minuto = time.monotonic() - ultimo_latido >= LATIDO_CADA_S
+        if cada_minuto:
             escribir_latido(db, "continuo", self.hasta)
             ultimo_latido = time.monotonic()
         if tg:
             perfiles = {p["id"]: p for p in db.leer("perfiles")}
+            if cada_minuto:
+                self.accesos(db, tg, perfiles)
             if atender_telegram(db, tg, perfiles, self.url_web, espera=ATENCION_ESPERA_S):
                 log.info("Telegram: chat vinculado")
         else:
